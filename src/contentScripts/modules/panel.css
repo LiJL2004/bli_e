@@ -628,52 +628,35 @@ input:checked + .track .thumb { transform: translateX(18px); }
 }
 
 /* 「奶睿设置键」：把悬浮球换成奶睿形象（界面优化 → 奶睿设置键，默认关闭）。
-   图片是 192×192 透明 PNG，用 88% 缩放让全身都在圆里；外面一圈白描边 + 黄色光晕，
-   和原版蓝色渐变球区分开。不加动画 —— 一个常驻的呼吸光晕就是每帧重绘，
-   和之前刚砍掉的那批骨架动画是同一类开销。 */
+   尺寸与原版 ⚙ 一致（44×44）；底色是铺满圆盘的黄色径向渐变，角色压在上面，
+   光晕从角色身后向圆外弥漫。不加白描边（会和页面底色/毛玻璃打架），
+   也不加动画 —— 常驻动画每帧重绘，和之前砍掉的骨架动画是同一类开销。 */
 .btn.is-mascot {
-  width: 52px;
-  height: 52px;
+  width: 44px;
+  height: 44px;
   background-color: #FFD338;
   /* 第一层是角色图，第二层是铺满整个圆盘的黄色径向渐变 —— 光晕从角色身后起，
-     圆盘里不留任何空白；再配合 box-shadow 继续向外弥漫 */
+     圆盘里不留空白；再配合 box-shadow 向外弥漫。尺寸与原版 ⚙ 一致（44×44）。 */
   background-image:
     var(--bili-mascot-img, none),
     radial-gradient(circle at 50% 62%, #FFF6D0 0%, #FFE071 42%, #FFC400 100%);
   background-position: center, center;
   background-repeat: no-repeat, no-repeat;
-  background-size: 86%, 100% 100%;
+  background-size: 88%, 100% 100%;
   color: transparent;
   box-shadow:
-    0 0 0 2px rgba(255, 255, 255, 0.92),
     0 4px 12px rgba(255, 180, 0, 0.5),
-    0 0 26px 8px rgba(255, 200, 30, 0.62);
+    0 0 22px 6px rgba(255, 200, 30, 0.6);
 }
 .btn.is-mascot:hover {
   transform: scale(1.08);
   box-shadow:
-    0 0 0 2px rgba(255, 255, 255, 0.96),
-    0 6px 18px rgba(255, 180, 0, 0.6),
-    0 0 34px 12px rgba(255, 200, 30, 0.78);
+    0 6px 16px rgba(255, 180, 0, 0.6),
+    0 0 30px 10px rgba(255, 200, 30, 0.76);
 }
 .btn.is-mascot:active {
   transform: scale(0.92, 0.95);
   box-shadow:
-    0 0 0 2px rgba(255, 255, 255, 0.92),
     0 3px 10px rgba(255, 180, 0, 0.55),
-    0 0 20px 6px rgba(255, 200, 30, 0.6);
-}
-.btn.is-mascot:hover {
-  transform: scale(1.08);
-  box-shadow:
-    0 0 0 2px rgba(255, 255, 255, 0.95),
-    0 8px 22px rgba(255, 190, 0, 0.55),
-    0 0 30px 8px rgba(255, 206, 45, 0.72);
-}
-.btn.is-mascot:active {
-  transform: scale(0.92, 0.95);
-  box-shadow:
-    0 0 0 2px rgba(255, 255, 255, 0.9),
-    0 4px 14px rgba(255, 190, 0, 0.45),
-    0 0 18px 2px rgba(255, 206, 45, 0.6);
+    0 0 16px 4px rgba(255, 200, 30, 0.58);
 }

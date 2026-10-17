@@ -110,12 +110,13 @@ html.bili-elite-home-opt.bili-elite-topbar-ready #bili-elite-topbar-skeleton {
 }
 
 /* 「奶睿顶栏图」：把左上角的自绘字标换成奶睿形象（界面优化 → 奶睿顶栏图，默认关闭）。
-   原字标是 76×34 的 mask（B 站字标），换成方形插画后按高度对齐 —— 保持 34px 高、
-   垂直居中、left 仍是 24px，宽度收到 42px，视觉上还是原来那个位置上的图标。
+   原字标是 76×34 的 mask（B 站字标）。插画按 38px 高、48px 宽对齐，再右移 8px
+   （left 基准仍是 24px），整体视觉重心落在原字标的位置上，比原字标略大一点。
    不加光晕 / 阴影，避免和顶栏的毛玻璃材质打架。 */
 html.bili-elite-mascot-logo #bili-elite-logo .bili-elite-logo__mark {
-  width: 42px;
-  height: 34px;
+  width: 48px;
+  height: 38px;
+  margin-left: 8px;
   background-color: transparent;
   -webkit-mask: none;
   mask: none;
