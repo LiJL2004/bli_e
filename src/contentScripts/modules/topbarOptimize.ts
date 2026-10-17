@@ -87,6 +87,9 @@ const ROOT_PRELOAD = 'bili-elite-preload'
 /** 「播放页右栏留白收起」/「顶部提示条收起」：只切 root class，纯 CSS 生效（无需 JS 观察器） */
 const ROOT_RAIL_COMPACT = 'bili-elite-rail-compact'
 const ROOT_NOTICE_COMPACT = 'bili-elite-notice-compact'
+/** 原生浮动按钮屏蔽：「刷新（刷新内容 / 换一换）」与「返回顶部」各一个开关（见 topbar.css §17） */
+const ROOT_NATIVE_REFRESH_HIDE = 'bili-elite-native-refresh-hide'
+const ROOT_NATIVE_BACKTOP_HIDE = 'bili-elite-native-backtop-hide'
 
 /** 「奶睿顶栏图」——把左上角自绘字标换成奶睿形象 */
 const ROOT_MASCOT_LOGO = 'bili-elite-mascot-logo'
@@ -640,6 +643,12 @@ function applyLayoutCompact() {
   document.documentElement.classList.toggle(ROOT_NOTICE_COMPACT, get('noticeCompact'))
 }
 
+/** 「原生刷新 / 原生返回顶部按钮屏蔽」：只切 root class，纯 CSS 生效（见 topbar.css §17） */
+function applyNativeHide() {
+  document.documentElement.classList.toggle(ROOT_NATIVE_REFRESH_HIDE, get('nativeRefreshHide'))
+  document.documentElement.classList.toggle(ROOT_NATIVE_BACKTOP_HIDE, get('nativeBackTopHide'))
+}
+
 /** 「奶睿顶栏图」：只切 root class + 写一个 CSS 变量，纯 CSS 生效 */
 function applyMascotLogo() {
   const root = document.documentElement
@@ -706,6 +715,7 @@ export function setupTopbarOptimize(): () => void {
   applyPreload(get('preload'))
   applyCardScopes()
   applyLayoutCompact()
+  applyNativeHide()
   applyMascotLogo()
   applyTopbarParams()
   applySearchParams()
@@ -724,6 +734,8 @@ export function setupTopbarOptimize(): () => void {
       applyPreload(get('preload'))
     } else if (key === 'railCompact' || key === 'noticeCompact') {
       applyLayoutCompact()
+    } else if (key === 'nativeRefreshHide' || key === 'nativeBackTopHide') {
+      applyNativeHide()
     } else if (key === 'mascotLogo') {
       applyMascotLogo()
     } else if (key in CARD_SCOPE_CLASSES) {
@@ -759,6 +771,8 @@ export function setupTopbarOptimize(): () => void {
       ROOT_PRELOAD,
       ROOT_RAIL_COMPACT,
       ROOT_NOTICE_COMPACT,
+      ROOT_NATIVE_REFRESH_HIDE,
+      ROOT_NATIVE_BACKTOP_HIDE,
       ROOT_MASCOT_LOGO,
       ...Object.values(CARD_SCOPE_CLASSES),
     )

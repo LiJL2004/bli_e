@@ -35,6 +35,14 @@ export const FEATURES = [
   // cardBreak 让这两项从上面的卡片断开、另起一张。
   { key: 'railCompact', label: '播放页右栏留白收起', default: true, group: '界面优化', cardBreak: true },
   { key: 'noticeCompact', label: '顶部提示条收起', default: true, group: '界面优化' },
+  // 右下角自绘的两枚浮动键（挂在设置键上方）。返回顶部全站都有，刷新只有首页有 ——
+  // 「统一」是相对 B 站原生那几枚分散的按钮而言：一套样式、一套位置，原生那批由下面两个开关收掉。
+  { key: 'backTopBtn', label: '统一返回顶部键', default: true, group: '界面优化', cardBreak: true },
+  { key: 'refreshBtn', label: '统一刷新键', default: true, group: '界面优化' },
+  // 原生浮动按钮屏蔽：刷新（首页「刷新内容」+ 信息流「换一换」）与返回顶部各一个开关，
+  // 三点菜单与客服没有开关、始终隐藏（见 topbar.css §17）
+  { key: 'nativeRefreshHide', label: '原生刷新按钮屏蔽', default: true, group: '界面优化', cardBreak: true },
+  { key: 'nativeBackTopHide', label: '原生返回顶部按钮屏蔽', default: true, group: '界面优化' },
   // 把右下角那颗 ⚙ 换成奶睿形象；默认关闭，保持原版悬浮球
   { key: 'mascotButton', label: '奶睿设置键', default: false, group: '个性设置' },
   // 把顶栏左上角的 logo 换成奶睿形象；默认关闭，关着仍是原版自绘字标

@@ -1,6 +1,7 @@
 import './styles.css'
 import { bootstrapConfig } from './config'
 import { bootstrapGlassConfig } from './modules/glassConfig'
+import { setupFloatingButtons } from './modules/floatingButtons'
 import { setupImageGlass } from './modules/imageGlass'
 import { setupImageViewer } from './modules/imageViewer'
 import { setupImageStyle } from './modules/imageStyle'
@@ -35,6 +36,8 @@ function initModules() {
   setupImageStyle()
   setupImageGlass()
   setupSettingsPanel()
+  // 浮动键挂在设置键上方，两者互不依赖；放在后面只是让 ⚙ 先就位，避免首帧位置跳一下
+  setupFloatingButtons()
 }
 
 if (document.readyState === 'loading') {

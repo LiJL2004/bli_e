@@ -1017,3 +1017,42 @@ html.bili-elite-home-opt .recommended-container_floor-aside .floor-skeleton .ske
     background-image: none !important;
   }
 }
+
+/* ===== 17. 原生浮动按钮（右下角那一列）=====
+   B 站把「刷新 / 换一换 / 三点 / 客服 / 顶部」分散在四套容器里，各自一套样式：
+     - 首页：`.palette-button-wrap`（fixed，right 60px）里有「刷新内容」
+       `.flexible-roll-btn.refresh`、「三点」`.storage-box`、「顶部」`.to-top-btn`、
+       「客服」`.customer-service-btn`；信息流栅格右上角另有一枚「换一换」`.feed-roll-btn`；
+     - 搜索页：`.side-buttons`（absolute，贴在结果区右侧）里有「客服」（一个
+       `a[href*="customer-service"]`）和「顶部」`.btn-to-top-wrap`；
+     - 视频页：`.fixed-sidenav-storage`（fixed）里有「小窗」「客服」`a.customer-service`
+       和「顶部」`.back-to-top-wrap`；
+     - 动态页：`.bili-dyn-sidebar` 里的「回到顶部」（见 §10.2，同一容器里的「回到旧版」始终隐藏）。
+   我们自己在右下角画了一套「返回顶部 / 刷新」（见 floatingButtons.ts），原生这批就多余了：
+   位置打架、语义重复。这里按「始终隐藏」+「两个开关」分两层收掉。
+   注：客服那几条带了 `:has(> …)` 的父级选择器 —— 搜索页 / 视频页的客服外面还套了一层
+   `div`，只藏 `a` 会在 flex 列里留下一个占位空档。 */
+
+/* 17.1 始终隐藏：三点菜单（「…」，功能入口重复且位置撞车）与客服 */
+html.bili-elite-home-opt .palette-button-wrap .storage-box,
+html.bili-elite-home-opt .customer-service-btn,
+html.bili-elite-home-opt a[href*="customer-service"],
+html.bili-elite-home-opt .side-buttons > div:has(> a[href*="customer-service"]),
+html.bili-elite-home-opt .fixed-sidenav-storage > div:has(> a.customer-service) {
+  display: none !important;
+}
+
+/* 17.2 「原生刷新按钮屏蔽」：首页「刷新内容」+ 信息流里的「换一换」 */
+html.bili-elite-native-refresh-hide .flexible-roll-btn.refresh,
+html.bili-elite-native-refresh-hide .feed-roll-btn {
+  display: none !important;
+}
+
+/* 17.3 「原生返回顶部按钮屏蔽」：首页「顶部」、搜索页「顶部」、视频页「顶部」、
+   动态页「回到顶部」。四家类名互不相同，只能一条一个。 */
+html.bili-elite-native-backtop-hide .to-top-btn,
+html.bili-elite-native-backtop-hide .btn-to-top-wrap,
+html.bili-elite-native-backtop-hide .back-to-top-wrap,
+html.bili-elite-native-backtop-hide .bili-dyn-sidebar__btn:has(.back-top) {
+  display: none !important;
+}
