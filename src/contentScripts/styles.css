@@ -1,0 +1,20 @@
+/* 全屏状态下隐藏页面其他元素的干扰 */
+body.my-bili-fullscreen {
+    overflow: hidden !important;
+}
+
+body.my-bili-fullscreen .bpx-player-container {
+    /* 确保容器固定在视口，不受页面滚动影响 */
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    z-index: 999999 !important;
+    border-radius: 0 !important;
+}
+
+/* 按钮图标：可选地替换为“退出全屏”的图标样式 */
+.bpx-player-ctrl-btn.bpx-player-ctrl-full[data-my-fullscreen="1"] {
+    /* 可以在这里用 background-image 替换图标，或旋转箭头 */
+}

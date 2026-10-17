@@ -1,0 +1,992 @@
+/*
+ * 奶睿pro 顶栏样式
+ *
+ * 由 topbarOptimize.ts 在 document_start 注入到
+ * <style id="bili-elite-topbar-style">。开关通过 <html> 上的类名控制：
+ *   - html.bili-elite-home-opt 顶栏改造，始终生效（作用于所有页面）
+ *   - html.bili-elite-home-only 「首页优化」——仅首页去掉大图横幅 / 分类栏，
+ *     并屏蔽视频卡片悬停时浮出的「稍后再看」按钮
+ *   - html.bili-elite-glass         「顶栏材质」——顶栏毛玻璃开关
+ *   - html.bili-elite-searchbox-glass    「搜索框材质」——搜索框毛玻璃开关
+ *   - html.bili-elite-searchpanel-glass  「搜索面板材质」——搜索历史 / 热搜面板毛玻璃开关
+ *   - html.bili-elite-searchpanel-opt    「搜索面板优化」——搜索历史 / 热搜面板改版样式与弹出 / 收回动画
+ *   - html.bili-elite-preload            「首页预加载」——把首页加载哨兵上抬，提前取回下一批推荐
+ *   - html.bili-elite-rail-compact      「播放页右栏留白收起」——摘掉右栏那块空白占位
+ *   - html.bili-elite-notice-compact    「顶部提示条收起」——摘掉页面顶部那条 30px 提示条
+ *   - html.bili-elite-card-border-home / -confirm-home      首页卡片边界 / 卡片确认
+ *   - html.bili-elite-card-border-search / -confirm-search  搜索页卡片边界 / 卡片确认
+ *   - html.bili-elite-card-border-video / -confirm-video    视频页卡片边界 / 卡片确认
+ * 以下 CSS 变量由脚本写入 <html> 的行内样式（各材质独立，设置面板滑块控制）：
+ *   - --bili-topbar-blur / --bili-topbar-tint            顶栏模糊 / 白色遮罩(0–1)
+ *   - --bili-searchbox-blur / --bili-searchbox-tint       搜索框模糊 / 白色遮罩(0–1)
+ *   - --bili-searchpanel-blur / --bili-searchpanel-tint   搜索面板模糊 / 白色遮罩(0–1)
+ *   - --bili-topbar-arrow  「首页 ∨」下拉箭头的 SVG 遮罩
+ */
+
+/* ===== 通用顶栏（首页 + 搜索 / 动态 / 视频等所有页面） ===== */
+
+/* 1. 顶栏常驻 fixed，禁用滑入动画（消除下滑闪现 / 闪烁） */
+html.bili-elite-home-opt .bili-header .bili-header__bar {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  width: auto !important;
+  background: #fff !important;
+  animation: none !important;
+  opacity: 1 !important;
+  transform: none !important;
+  transition: none !important;
+}
+
+/* 1.1 播放页等在 Vue 接管之前会先渲染一版旧顶栏：
+   .bili-header.fixed-header > .bili-header__bar.mini-header，导航项是
+   ul.left-entry > li（不是 .left-entry__item）。它会在首屏可见约 1s。
+   若整块隐藏，顶部会空出一块、看起来「顶栏加载很慢」；因此把它压成一条
+   与新版一致的空白栏（旧内容不可见），等新版顶栏接入后自然被替换，
+   视觉上顶栏自始至终都在 */
+html.bili-elite-home-opt .bili-header.fixed-header {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  width: auto !important;
+  height: 64px !important;
+  background: #fff !important;
+  animation: none !important;
+  opacity: 1 !important;
+  transform: none !important;
+  transition: none !important;
+  z-index: 1000 !important;
+  overflow: hidden !important;
+}
+html.bili-elite-home-opt .bili-header.fixed-header > *,
+html.bili-elite-home-opt .bili-header .bili-header__bar.mini-header {
+  visibility: hidden !important;
+}
+
+/* 1.2 首屏骨架栏：B 站自身的顶栏（尤其是播放页）往往要等它较重的 JS
+   才开始渲染，导致「顶栏加载慢」。这条骨架由脚本在 document_start 立即
+   插入，只画一个品牌 logo，等新版顶栏导航（.left-entry__item）就位后
+   自动隐藏，从而与 B 站的加载速度解耦。 */
+#bili-elite-topbar-skeleton {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+  display: none;
+  align-items: center;
+  padding-left: 24px;
+  box-sizing: border-box;
+  background: #fff;
+  pointer-events: none;
+  z-index: 1002;
+}
+html.bili-elite-home-opt #bili-elite-topbar-skeleton {
+  display: flex;
+}
+/* 注意：骨架栏是 document.documentElement.appendChild 出来的，也就是 <html> 的子节点，
+   **不在 <body> 里面**。所以这里不能写 `body:has(...) #bili-elite-topbar-skeleton`
+   —— 那样它永远匹配不到，骨架栏会一直挂着（网页全屏时就在视频顶上留一条白条）。
+   用 `html:has(...)` 才是对的：html 是根元素，页面里出现 .left-entry__item 就成立。 */
+/* 退场条件两条，缺一条骨架栏就会一直盖在该站真正的顶栏上面：
+   1) 主站：通用顶栏的导航项 .left-entry__item 就位；
+   2) 其它子站（游戏 / 商城 / 漫画…）：顶栏类名完全不统一，由脚本按「视口顶部
+      出现一条 ≥40px 高、占大半屏宽的固定 / 吸顶栏」判定，给 <html> 打上
+      .bili-elite-topbar-ready（见 topbarOptimize.ts 的 foreignTopbarReady）。
+   注意直播站（live.bilibili.com）整套顶栏改造都不接（见 isTopbarOptExcluded），
+   它的骨架栏根本不会插入，也就用不到这条退场条件。 */
+html.bili-elite-home-opt:has(.left-entry__item) #bili-elite-topbar-skeleton,
+html.bili-elite-home-opt.bili-elite-topbar-ready #bili-elite-topbar-skeleton {
+  display: none;
+}
+#bili-elite-topbar-skeleton .bili-elite-logo__mark {
+  width: 76px;
+  height: 34px;
+  background-color: #00aeec;
+  -webkit-mask: url("//i0.hdslb.com/bfs/archive/a6fc20e8360913e8c796df1def661bf1d7f1b9c8.png") no-repeat center / contain;
+  mask: url("//i0.hdslb.com/bfs/archive/a6fc20e8360913e8c796df1def661bf1d7f1b9c8.png") no-repeat center / contain;
+}
+
+/* 2. 深色文字 / 图标（SVG 走 currentColor）。
+   「投稿」是粉色按钮、文字与图标本来就是白色，要排除在外，否则会被染黑 */
+html.bili-elite-home-opt .bili-header .bili-header__bar .left-entry,
+html.bili-elite-home-opt .bili-header .bili-header__bar .right-entry,
+html.bili-elite-home-opt .bili-header .bili-header__bar .left-entry__item-trigger,
+html.bili-elite-home-opt .bili-header .bili-header__bar .right-entry__item:not(.right-upload-entry),
+html.bili-elite-home-opt .bili-header .bili-header__bar .right-entry__item:not(.right-upload-entry) .trigger-text {
+  color: #18191c !important;
+}
+html.bili-elite-home-opt .bili-header .bili-header__bar .left-entry__item-trigger:hover,
+html.bili-elite-home-opt .bili-header .bili-header__bar .right-entry__item:not(.right-upload-entry):hover,
+html.bili-elite-home-opt .bili-header .bili-header__bar .right-entry__item:not(.right-upload-entry):hover .trigger-text {
+  color: #00aeec !important;
+}
+/* 投稿按钮还原为原版白色文字 / 图标 */
+html.bili-elite-home-opt .bili-header .bili-header__bar .right-entry__main .right-upload-entry,
+html.bili-elite-home-opt .bili-header .bili-header__bar .right-entry__main .right-upload-entry .trigger-text,
+html.bili-elite-home-opt .bili-header .bili-header__bar .right-entry__main .right-upload-entry .trigger-icon {
+  color: #fff !important;
+}
+
+/* 2.1 右侧图标区行高统一：
+   搜索页等会给顶栏加 .white-bg-bar，使「大会员」这类条目的文字行高变成 16.25px，
+   图标整体比首页下移约 2px。这里统一成首页的 20.8px，让各页面完全一致
+   （投稿按钮是另一种形态，排除） */
+html.bili-elite-home-opt .bili-header .bili-header__bar .right-entry__main .right-entry__item:not(.right-upload-entry) .right-entry__item-trigger,
+html.bili-elite-home-opt .bili-header .bili-header__bar .right-entry__main .right-entry__item:not(.right-upload-entry) .trigger-text {
+  line-height: 20.8px !important;
+}
+
+/* 2.2 右侧精简：去掉「大会员」与「创作中心」。
+   .right-entry__main 是顺序排列的 flex，隐藏后其余项会自动向右补位，间隔保持不变 */
+html.bili-elite-home-opt .bili-header .bili-header__bar .right-entry__main .right-entry__item.vip-entry,
+html.bili-elite-home-opt .bili-header .bili-header__bar .right-entry__main .right-entry__item.bili-elite-hidden-right {
+  display: none !important;
+}
+
+/* 3. 左上角统一：[logo] 首页∨ 动态
+   只保留「首页」与「动态」（第二个导航项，由脚本就地改名），其余隐藏 */
+html.bili-elite-home-opt .bili-header .left-entry .left-entry__item:not(.home-page-entry):not(.home-page-panel-entry):not(.bili-elite-dynamic) {
+  display: none !important;
+}
+/* 导航文字行高统一：搜索页等 B 站自己用的是 17.5px，这里统一成 22.4px。
+   文字竖直中心不变（都在 32px 处），只是行盒尺寸与其它页面一致 */
+html.bili-elite-home-opt .bili-header .left-entry .left-entry__item-trigger {
+  line-height: 22.4px !important;
+}
+/* 左侧导航整体右移，给自绘 logo 让出与迷你顶栏等宽的位置 */
+html.bili-elite-home-opt .bili-header .left-entry .left-entry-main {
+  margin-left: 96px !important;
+  /* 自绘面板挂在这一层（「大顶栏」与「收起」两种状态下是同一个节点），
+     保证两种状态下面板的位置与显隐完全一致 */
+  position: relative !important;
+}
+/* 隐藏 B 站自带 logo 与「首页」小图标，避免和自绘 logo 重复 */
+html.bili-elite-home-opt .bili-header .left-entry .big-logo {
+  display: none !important;
+}
+html.bili-elite-home-opt .bili-header .left-entry .home-page-entry .trigger-icon {
+  display: none !important;
+}
+/* 顶栏收起（迷你）时 B 站自带的首页面板：隐藏，两种状态统一用自绘面板 */
+html.bili-elite-home-opt .bili-header .left-entry .home-page-panel-entry .v-popover {
+  display: none !important;
+}
+/* 下拉箭头：隐藏原生箭头，用 CSS 伪元素自绘同款 SVG。
+   伪元素跟着类名即时渲染，不依赖 JS 注入，跨「首页」节点替换也不会丢失，因此不会闪 */
+html.bili-elite-home-opt .bili-header .left-entry .home-page-entry .trigger-arrow,
+html.bili-elite-home-opt .bili-header .left-entry .home-page-panel-entry .trigger-arrow {
+  display: none !important;
+}
+html.bili-elite-home-opt .bili-header .left-entry :is(.home-page-entry, .home-page-panel-entry) a.left-entry__item-trigger::after {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-left: 5px;
+  flex: 0 0 auto;
+  background-color: currentColor;
+  -webkit-mask: var(--bili-topbar-arrow) no-repeat center / contain;
+  mask: var(--bili-topbar-arrow) no-repeat center / contain;
+}
+
+/* 4. 搜索栏绝对居中（不受左右导航宽度变化影响）
+   这里刻意不用 transform 居中：.center-search-container 是搜索框 / 搜索面板的
+   祖先，一旦它有 transform，就会成为「背景根（backdrop root）」，使后代的
+   backdrop-filter 只取到容器内部那点内容 → 「搜索框材质 / 搜索面板材质」的模糊
+   完全失效。改用 inset:0 + 固定宽高 + margin:auto（与 transform 居中效果等价）。 */
+html.bili-elite-home-opt .bili-header .bili-header__bar .center-search-container {
+  position: absolute !important;
+  inset: 0 !important;
+  margin: auto !important;
+  width: 500px !important;
+  max-width: 46vw !important;
+  height: 40px !important;
+  transform: none !important;
+}
+
+/* 5. 仅首页（大顶栏）：移除大图横幅 / 分类栏 —— 由「首页优化」独立控制 */
+html.bili-elite-home-only .bili-header--large .bili-header__banner,
+html.bili-elite-home-only .bili-header--large .taper-line,
+html.bili-elite-home-only .bili-header--large .bili-header__channel,
+html.bili-elite-home-only .header-channel {
+  display: none !important;
+}
+/* 「顶栏优化」把顶栏固定后，首页大顶栏需要预留同高的顶部空间 */
+html.bili-elite-home-opt .bili-header--large {
+  padding-top: 64px !important;
+}
+
+/* 5.1 屏蔽视频卡片悬停时浮出的「稍后再看」按钮 —— 由「首页优化」独立控制。两处：
+   1) 封面右上角那枚圆形按钮：容器是 `.bili-watch-later--wrap`（注意是**双连字符**，
+      网上流传的 `.bili-watch-later-wrap` 早就不是这个名字了），它挂在
+      `.bili-video-card__image--wrap` 里，内部 `.bili-watch-later` 由 B 站按悬停状态
+      切 inline `display` —— 所以只能整块把外层容器摘掉，压内层是压不住的；
+   2) 卡片右下角悬浮操作区里的那枚：`.watchlater-pip-button`，B 站动态插入到
+      `.palette-button-wrap` 里。
+   两者都用 !important 压掉 display；容器消失后不会留空白，因为它是绝对定位的浮层。 */
+html.bili-elite-home-only .bili-watch-later--wrap,
+html.bili-elite-home-only .watchlater-pip-button,
+html.bili-elite-home-only .watchlater-pip-button-inner-wrap {
+  display: none !important;
+}
+
+/* 5.2 首页推荐流里混进来的特殊卡片 —— 由「首页优化」独立控制。两类：
+   1) B 站自己的「楼层卡」.floor-single-card：番剧 / 直播 / 国创 / 综艺 / 课堂 /
+      电影 / 电视剧 / 纪录片 / 漫画 / 赛事 等，被当作栅格直接子项与普通视频卡
+      （.bili-feed-card）并排插进推荐流里；
+   2) 直播间卡片 .bili-live-card：FeedCard 在 goto=live 时渲染的整张卡。
+   推荐栅格本身是 display:grid（.recommended-container_floor-aside .container），
+   所以直接 display:none 即可 —— 后续卡片会自动回填。
+
+   **只摘「有数据的真卡片」，骨架占位必须留着。** B 站在末尾渲染一批骨架卡
+   （.bili-video-card__skeleton / .floor-skeleton / .bili-live-card__skeleton）填住还没取
+   回来的格子；要是连骨架一起摘掉，加载过程中那几格就真的空了 —— 下滑时看到的
+   「空洞」正是这么来的。判据：
+   - 楼层卡：骨架是 .floor-card.single-card.floor-skeleton，真卡片里没有 floor-skeleton；
+   - 直播间卡：真卡片里那个 .bili-live-card__skeleton 带 .hide（B 站用它占位再
+     visibility:hidden 藏掉），所以「可见的骨架」= .bili-live-card__skeleton:not(.hide)。
+   注：:has() 不能嵌在 :has() 里，但把 :has() 放进 :not() 里是合法的。 */
+html.bili-elite-home-only .recommended-container_floor-aside .container > .floor-single-card:not(:has(.floor-skeleton)),
+html.bili-elite-home-only .recommended-container_floor-aside .container > .bili-live-card:not(:has(.bili-live-card__skeleton:not(.hide))) {
+  display: none !important;
+}
+
+/* 5.3 补掉栅格里的「空洞」+ 行距统一 —— 由「首页优化」控制。
+
+   一、空洞是怎么来的。B 站的 FeedCard（根节点 .bili-feed-card）按 item 的 goto 分发：
+   `av` / `ad` → 视频卡，`live` → 直播卡，`login_card` → 登录卡，**其余类型（例如
+   ogv_season 番剧）直接渲染成一个空壳**（只挂一个注释节点）。这个空壳仍然是栅格的
+   一个子项，照样占着一格 —— 卡片流里就出现一个整格大小的「空洞」。
+   这里把空壳摘掉：`:empty` 不把注释算作子节点，正好用来匹配它。外层的 .feed-card 壳
+   自身有子节点（那个空壳），所以要额外用 `:has(> .bili-feed-card:empty)` 把「只装着
+   一个空壳」的外壳也摘掉，否则它还会占着那一格。
+   注意别写成 `:not(:has(*))` —— `:has()` 不能嵌在 `:has()` 里（哪怕中间套一层
+   `:not()`），Chrome 会判该选择器无效，并因此丢掉整条规则（不是只丢那一个选择器）。
+
+   二、行距统一。5.2 把「楼层卡」摘掉之后，B 站两处「按 DOM 序号写死」的间距会露馅：
+   1) `.container > *:nth-of-type(n+8) { margin-top: 40px }` 只管第 8~12 个子项，
+      第 13 个起又被 `nth-of-type(n+13)` 改成 24px。隐藏楼层卡后，原本排在后面的卡片
+      会顶进这些位置，于是同一行里出现 40px / 24px 两种上边距 —— 卡片上下错开 16px。
+      这里把第 8 个子项起统一成 24px（与大多数行一致）：整行对齐，也不可能再错位。
+   2) `.floor-single-card:first-of-type { margin-top: 40px }` 随楼层卡一起失效，
+      统一成 24px 后无需单独处理。 */
+html.bili-elite-home-only .recommended-container_floor-aside .container > .feed-card:empty,
+html.bili-elite-home-only .recommended-container_floor-aside .container > .bili-feed-card:empty,
+html.bili-elite-home-only .recommended-container_floor-aside .container > .feed-card:has(> .bili-feed-card:empty) {
+  display: none !important;
+}
+html.bili-elite-home-only .recommended-container_floor-aside .container > *:nth-of-type(n+8) {
+  margin-top: 24px !important;
+}
+
+/* 5.4 首页首行与顶栏的间距 —— 由「首页优化」控制。
+   「首页优化」把大图横幅整块拿掉后，首页内容（.bili-feed4-layout）会直接顶到固定
+   顶栏下沿（top = 64px，间距 0），第一行卡片贴着顶栏、看着很挤。这里补一点上边距。
+   用 padding 而不是 margin：.bili-feed4-layout 的父级是普通块，margin 会向上折叠。 */
+html.bili-elite-home-only .bili-feed4-layout {
+  padding-top: 20px !important;
+}
+
+/* 5.5 首页左上角的轮播大图（.recommended-swipe，占 2×2 个栅格）—— 由「首页优化」控制。
+   它是栅格里的第一个子项，display:none 之后后面的卡片会自动回填，不会留下空洞。
+   注意 B 站给 `.container > *:nth-of-type(n+8)` 的 40px 行距是按「轮播占住第 1 格」
+   算出来的：轮播一去掉，后面卡片的序号整体前移一位，§5.3 那条 24px 归一化也跟着错位。
+   所以这里顺手把轮播之后所有子项的 margin-top 压平，行距统一交给栅格自己的 20px gap。 */
+html.bili-elite-home-only .recommended-container_floor-aside .container > .recommended-swipe {
+  display: none !important;
+}
+html.bili-elite-home-only .recommended-container_floor-aside .container > *:nth-of-type(n+2) {
+  margin-top: 0 !important;
+}
+
+/* 6. 自绘 bilibili logo（用官方 logo 图做遮罩上色，与迷你顶栏同款、同尺寸）。
+   这里显式清掉 filter / text-shadow / box-shadow：logo 只是一个纯色遮罩块，
+   任何阴影或滤镜都会在蓝色轮廓外糊出一圈光晕。 */
+#bili-elite-logo,
+#bili-elite-logo .bili-elite-logo__mark,
+#bili-elite-topbar-skeleton .bili-elite-logo__mark {
+  filter: none !important;
+  text-shadow: none !important;
+  box-shadow: none !important;
+}
+
+#bili-elite-logo {
+  position: fixed;
+  top: 0;
+  left: 24px;
+  height: 64px;
+  display: none;
+  align-items: center;
+  z-index: 1003;
+}
+#bili-elite-logo .bili-elite-logo__mark {
+  width: 76px;
+  height: 34px;
+  background-color: #00aeec;
+  -webkit-mask: url("//i0.hdslb.com/bfs/archive/a6fc20e8360913e8c796df1def661bf1d7f1b9c8.png") no-repeat center / contain;
+  mask: url("//i0.hdslb.com/bfs/archive/a6fc20e8360913e8c796df1def661bf1d7f1b9c8.png") no-repeat center / contain;
+}
+html.bili-elite-home-opt body:has(.bili-header) #bili-elite-logo {
+  display: flex;
+}
+
+/* 7. 首页下拉面板（自绘，复刻 B 站频道面板）
+   挂在 .left-entry-main 上：顶部状态与收起状态共用同一个面板，外观 / 位置一致 */
+#bili-elite-home-panel {
+  position: absolute;
+  top: 64px;
+  left: -96px;
+  padding-top: 8px;
+  display: none;
+  z-index: 1004;
+}
+html.bili-elite-home-opt .bili-header .left-entry .left-entry-main > .home-page-entry:hover ~ #bili-elite-home-panel,
+html.bili-elite-home-opt .bili-header .left-entry .left-entry-main > .home-page-panel-entry:hover ~ #bili-elite-home-panel,
+#bili-elite-home-panel:hover {
+  display: block;
+}
+#bili-elite-home-panel .bili-elite-panel-card {
+  width: 767px;
+  background: #fff;
+  border: 1px solid #e3e5e7;
+  border-radius: 8px;
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+#bili-elite-home-panel .bili-header-channel-panel {
+  display: flex;
+  flex-direction: row;
+  padding: 16px 0;
+  background: #fff;
+}
+#bili-elite-home-panel .channel-panel__column {
+  display: flex;
+  flex-direction: column;
+  width: 153px;
+  padding: 0 16px;
+  box-sizing: border-box;
+}
+#bili-elite-home-panel .channel-panel__item {
+  display: flex;
+  align-items: center;
+  width: 120px;
+  height: 32px;
+  padding: 6px;
+  margin: 3px 0;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 22.4px;
+  color: #18191c;
+  text-decoration: none;
+  box-sizing: border-box;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+#bili-elite-home-panel .channel-panel__item:hover {
+  background-color: #f1f2f3;
+  color: #00aeec;
+}
+#bili-elite-home-panel .navigation-channel-icon {
+  width: 24px;
+  height: 24px;
+  margin-right: 10px;
+  flex-shrink: 0;
+}
+#bili-elite-home-panel .navigation-channel-name {
+  font-size: 14px;
+  line-height: 22.4px;
+  color: inherit;
+}
+
+/* ===== 搜索页：把搜索框并入顶栏中央，分类栏上提到顶栏下方 ===== */
+/* 搜索页自带一个页面级搜索框（.search-input），滚动后 B 站还会把它变形成一条
+   吸顶搜索条（.search-fixed-header）。因为顶栏被我们固定在顶部，这条吸顶条会和
+   顶栏重叠。处理方式：
+   - 整块隐藏页面自带的搜索框（连带吸顶条）；
+   - 把顶栏自带的搜索框（在搜索页被 B 站设成 display:none）重新显示，位置与其它
+     页面完全一致；
+   - 搜索框让出的空间消失后，「综合 / 视频…」会自然上提，紧贴顶栏下方。
+   用 :has(.search-layout) 判定搜索页，纯 CSS 即时生效、无闪烁。 */
+html.bili-elite-home-opt:has(.search-layout) .search-input {
+  display: none !important;
+}
+html.bili-elite-home-opt:has(.search-layout) .bili-header .bili-header__bar .center-search-container {
+  display: block !important;
+}
+html.bili-elite-home-opt:has(.search-layout) .search-header {
+  margin: 0 !important;
+  padding: 0 !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+html.bili-elite-home-opt:has(.search-layout) .search-tabs {
+  margin-top: 0 !important;
+}
+
+/* ===== 顶栏材质：iOS 风格毛玻璃 ===== */
+/* 模糊强度走 --bili-topbar-blur、白色遮罩走 --bili-topbar-tint（均由设置滑块写入），
+   所有页面统一取值。遮罩独立于模糊：模糊拉到 0 也能靠遮罩滑块把白底关掉。
+   尽量贴近 iOS 的 system material：
+   - 半透明填充 + 顶部高光渐变，制造「玻璃片」的层次；
+   - blur + 饱和度提升（180%+）让透过来的内容像 iOS 一样鲜活；
+   - brightness 轻微提亮，避免浅色背景发灰；
+   - 0.5px 发丝描边 + 极浅的内阴影，复刻 iOS 的材质边缘（随遮罩一起淡出）。 */
+/* 顶栏材质的模糊放在 ::before 上，而不是 .bili-header__bar 自身：
+   backdrop-filter 会给所在元素建立「背景根（backdrop root）」，而搜索框 / 搜索
+   面板都是 .bili-header__bar 的后代 —— 一旦模糊挂在 bar 上，它们各自的
+   backdrop-filter 就只能取到顶栏那层半透明白，「搜索框材质 / 搜索面板材质」的
+   模糊强度看起来完全不起作用。::before 不是它们的祖先，模糊挂在它上面即可绕开。
+   （::before 铺满整条顶栏、位于内容之下，观感与原来一致。） */
+html.bili-elite-glass .bili-header .bili-header__bar {
+  background: transparent !important;
+  box-shadow: 0 8px 24px rgba(20, 22, 30, calc(var(--bili-topbar-tint, 0.62) * 0.16)) !important;
+}
+html.bili-elite-glass .bili-header .bili-header__bar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  box-sizing: border-box;
+  border-radius: inherit;
+  pointer-events: none;
+  background-color: rgba(255, 255, 255, var(--bili-topbar-tint, 0.62));
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, calc(var(--bili-topbar-tint, 0.62) * 0.22)) 0%, rgba(255, 255, 255, 0) 62%);
+  -webkit-backdrop-filter: blur(var(--bili-topbar-blur, 24px)) saturate(190%) brightness(1.08);
+  backdrop-filter: blur(var(--bili-topbar-blur, 24px)) saturate(190%) brightness(1.08);
+  border-bottom: 0.5px solid rgba(0, 0, 0, calc(var(--bili-topbar-tint, 0.62) * 0.1));
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, calc(var(--bili-topbar-tint, 0.62) * 1.2));
+}
+/* 过渡期的旧顶栏空白栏同样换成 ::before（它也可能是搜索面板的祖先），材质一致 */
+html.bili-elite-glass .bili-header.fixed-header {
+  background: transparent !important;
+  box-shadow: 0 8px 24px rgba(20, 22, 30, calc(var(--bili-topbar-tint, 0.62) * 0.16)) !important;
+}
+html.bili-elite-glass .bili-header.fixed-header::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  box-sizing: border-box;
+  border-radius: inherit;
+  pointer-events: none;
+  background-color: rgba(255, 255, 255, var(--bili-topbar-tint, 0.62));
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, calc(var(--bili-topbar-tint, 0.62) * 0.22)) 0%, rgba(255, 255, 255, 0) 62%);
+  -webkit-backdrop-filter: blur(var(--bili-topbar-blur, 24px)) saturate(190%) brightness(1.08);
+  backdrop-filter: blur(var(--bili-topbar-blur, 24px)) saturate(190%) brightness(1.08);
+  border-bottom: 0.5px solid rgba(0, 0, 0, calc(var(--bili-topbar-tint, 0.62) * 0.1));
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, calc(var(--bili-topbar-tint, 0.62) * 1.2));
+}
+/* 骨架栏在毛玻璃开启时保持同一材质，避免加载期间出现纯白突变 */
+html.bili-elite-glass #bili-elite-topbar-skeleton {
+  background-color: rgba(255, 255, 255, var(--bili-topbar-tint, 0.62));
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, calc(var(--bili-topbar-tint, 0.62) * 0.22)) 0%, rgba(255, 255, 255, 0) 62%);
+  -webkit-backdrop-filter: blur(var(--bili-topbar-blur, 24px)) saturate(190%) brightness(1.08);
+  backdrop-filter: blur(var(--bili-topbar-blur, 24px)) saturate(190%) brightness(1.08);
+  border-bottom: 0.5px solid rgba(0, 0, 0, calc(var(--bili-topbar-tint, 0.62) * 0.1));
+  box-shadow:
+    inset 0 0.5px 0 rgba(255, 255, 255, calc(var(--bili-topbar-tint, 0.62) * 1.2)),
+    0 8px 24px rgba(20, 22, 30, calc(var(--bili-topbar-tint, 0.62) * 0.16));
+}
+
+/* ===== 8. 搜索框材质：顶栏中央的搜索框换成毛玻璃 ===== */
+/* 搜索框本体是 .center-search__bar 内的 #nav-searchform（高 40px、圆角 8px）。
+   焦点态下 B 站会再盖一层不透明白（#nav-searchform::before），并给
+   .nav-search-content / .nav-search-input 各填一层灰底；这些都要中和掉，
+   否则会把毛玻璃挡住。模糊 / 遮罩分别走 --bili-searchbox-blur / -tint，
+   遮罩为 0 时连同发丝描边与投影一起淡出。 */
+html.bili-elite-searchbox-glass .bili-header .center-search-container .center-search__bar #nav-searchform {
+  background-color: rgba(255, 255, 255, var(--bili-searchbox-tint, 0.62)) !important;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, calc(var(--bili-searchbox-tint, 0.62) * 0.2)) 0%, rgba(255, 255, 255, 0) 62%) !important;
+  -webkit-backdrop-filter: blur(var(--bili-searchbox-blur, 20px)) saturate(190%) brightness(1.08) !important;
+  backdrop-filter: blur(var(--bili-searchbox-blur, 20px)) saturate(190%) brightness(1.08) !important;
+  border: 0.5px solid rgba(0, 0, 0, calc(var(--bili-searchbox-tint, 0.62) * 0.1)) !important;
+  box-shadow:
+    inset 0 0.5px 0 rgba(255, 255, 255, calc(var(--bili-searchbox-tint, 0.62) * 1.2)),
+    0 2px 10px rgba(20, 22, 30, calc(var(--bili-searchbox-tint, 0.62) * 0.12)) !important;
+  opacity: 1 !important;
+}
+/* 聚焦时搜索框与弹出面板上下相接：把底角也改成直角，避免衔接处出现缺口
+   （B 站原本靠一层白色 :before 盖住这个缺口，这里已被我们中和掉） */
+html.bili-elite-searchbox-glass .bili-header .center-search-container .center-search__bar #nav-searchform.is-focus,
+html.bili-elite-searchbox-glass .bili-header .center-search-container .center-search__bar #nav-searchform.is-actived {
+  border-bottom-left-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+}
+/* 焦点态的白色覆盖层 / 灰色填充 —— 全部透明化，露出毛玻璃 */
+html.bili-elite-searchbox-glass .bili-header .center-search-container .center-search__bar #nav-searchform::before {
+  background: transparent !important;
+  opacity: 0 !important;
+}
+html.bili-elite-searchbox-glass .bili-header .center-search-container .center-search__bar .nav-search-content,
+html.bili-elite-searchbox-glass .bili-header .center-search-container .center-search__bar #nav-searchform.is-actived .nav-search-content,
+html.bili-elite-searchbox-glass .bili-header .center-search-container .center-search__bar #nav-searchform.is-focus .nav-search-content {
+  background-color: transparent !important;
+}
+html.bili-elite-searchbox-glass .bili-header .center-search-container .center-search__bar .nav-search-content .nav-search-input:focus,
+html.bili-elite-searchbox-glass .bili-header .center-search-container .center-search__bar .nav-search-content .nav-search-input:active {
+  background-color: transparent !important;
+}
+/* 聚焦时 B 站给整条搜索框加一圈固定投影，换成随遮罩淡出的玻璃投影 */
+html.bili-elite-searchbox-glass .bili-header .center-search-container .center-search__bar.is-focus {
+  box-shadow: 0 8px 24px rgba(20, 22, 30, calc(var(--bili-searchbox-tint, 0.62) * 0.16)) !important;
+}
+
+/* ===== 9. 搜索面板：改版样式 + 弹出 / 收回动画 + 毛玻璃 ===== */
+/* 点击搜索框弹出的「搜索历史 / 热搜」面板。.nav-search-panel 与 .search-panel
+   是同一个元素：前者负责定位（top:100%），后者是白色底板。 */
+
+/* 9.1 「搜索面板优化」（界面优化）：改版样式 + 弹出 / 收回动画。
+   外观：面板与搜索框「分离」（下移 8px）、四角圆角、完整描边 + 投影的浮起卡片；
+   搜索历史换成药丸状大圆角标签，历史区固定为 4 行高、装不下时上下滚动（见下）。
+   难点：B 站用行内 style 的 display 切换显隐（display:none ⇄ 清除），而 display
+   本身无法过渡。因此这里把面板强制常驻 display:block，显隐改由脚本切换
+   .bili-elite-sp-open（脚本读 B 站写在行内的 display 判断开合），再由
+   opacity / transform / visibility 过渡出「弹出」与「收回」两个方向的动画。
+   关闭态用 visibility:hidden，元素既不可见也不可交互。
+   上面这套「常驻 + 动画」只在脚本真正接管了该面板时才启用（.bili-elite-sp-managed，
+   由 searchPanelOpt.ts 打上）：万一脚本没能接上，面板会退回 B 站原生行为，
+   不会出现「打不开」。 */
+html.bili-elite-searchpanel-opt .bili-header .center-search-container .center-search__bar .nav-search-panel.bili-elite-sp-managed {
+  display: block !important;
+  /* 与搜索框「分离」：整体下移出一段间距，不再上下相接 */
+  top: calc(100% + 8px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-8px) scale(0.97);
+  transform-origin: top center;
+  transition:
+    opacity 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.26s cubic-bezier(0.22, 1.4, 0.4, 1),
+    visibility 0s linear 0.26s;
+}
+html.bili-elite-searchpanel-opt .bili-header .center-search-container .center-search__bar .nav-search-panel.bili-elite-sp-managed.bili-elite-sp-open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: none;
+  transition:
+    opacity 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.26s cubic-bezier(0.22, 1.4, 0.4, 1),
+    visibility 0s;
+}
+@media (prefers-reduced-motion: reduce) {
+  html.bili-elite-searchpanel-opt .bili-header .center-search-container .center-search__bar .nav-search-panel.bili-elite-sp-managed {
+    transition: none;
+  }
+}
+
+/* 面板与搜索框分离后，搜索框保留完整外观：B 站聚焦态本来会去掉下边框、把搜索框
+   和面板连成一体（「搜索框材质」还会把下角改成直角），这里把下边框 / 下圆角补回来 */
+html.bili-elite-searchpanel-opt .bili-header .center-search-container .center-search__bar #nav-searchform.is-focus,
+html.bili-elite-searchpanel-opt .bili-header .center-search-container .center-search__bar #nav-searchform.is-actived {
+  border-bottom: 1px solid var(--line_regular, #e3e5e7);
+  border-bottom-left-radius: 8px !important;
+  border-bottom-right-radius: 8px !important;
+}
+
+/* 面板底板：与搜索框分离的「浮起卡片」—— 四角都圆、完整描边 + 投影 */
+html.bili-elite-searchpanel-opt .bili-header .search-panel {
+  padding: 6px 0 10px;
+  border: 1px solid var(--line_regular, #e3e5e7);
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(20, 22, 30, 0.14);
+}
+
+/* 分组标题（搜索历史 / bilibili热搜）加粗，右侧「清空搜索历史」淡灰 */
+html.bili-elite-searchpanel-opt .bili-header .search-panel .header {
+  padding: 0 16px;
+}
+html.bili-elite-searchpanel-opt .bili-header .search-panel .header .title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #18191c;
+}
+html.bili-elite-searchpanel-opt .bili-header .search-panel .header .clear {
+  font-size: 13px;
+  color: #61666d;
+  transition: color 0.2s ease;
+}
+html.bili-elite-searchpanel-opt .bili-header .search-panel .header .clear:hover {
+  color: #00aeec;
+}
+
+/* 搜索历史：换成大圆角的药丸状标签。
+   词条行高 = 34 + 6 = 40px；历史区固定为 4 行高（172px，即改版前「展开更多」后的
+   最大高度），装不下的历史改为在区内上下滚动浏览 —— 不再需要「展开更多 / 收起」，
+   展开按钮也已一并去掉。 */
+html.bili-elite-searchpanel-opt .bili-header .histories-wrap {
+  padding: 0 16px;
+  /* 限高 + 滚动：B 站会把行内 max-height 写成收起值 92px，这里用 !important 顶掉，
+     高度恒定；超出部分靠滚动查看（裁切不依赖 B 站自身的规则）。 */
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(60, 60, 67, 0.28) transparent;
+}
+html.bili-elite-searchpanel-opt .bili-header .search-panel .history .histories-wrap {
+  max-height: 172px !important;
+}
+/* 细滚动条（与设置面板 .panel-body 同款），避免系统粗滚动条打断面板的观感 */
+html.bili-elite-searchpanel-opt .bili-header .histories-wrap::-webkit-scrollbar {
+  width: 8px;
+}
+html.bili-elite-searchpanel-opt .bili-header .histories-wrap::-webkit-scrollbar-track {
+  background: transparent;
+}
+html.bili-elite-searchpanel-opt .bili-header .histories-wrap::-webkit-scrollbar-thumb {
+  background: rgba(60, 60, 67, 0.22);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+html.bili-elite-searchpanel-opt .bili-header .histories-wrap::-webkit-scrollbar-thumb:hover {
+  background: rgba(60, 60, 67, 0.38);
+  background-clip: padding-box;
+}
+/* 顶部留白 + 去掉末行的下外边距：4 行 × 40px = 160px，加 10px 顶部留白正好 170px，
+   恰好落在 172px 之内 —— 只有真的超过 4 行才会出现滚动条。 */
+html.bili-elite-searchpanel-opt .bili-header .histories {
+  margin-top: 10px;
+  margin-bottom: 0;
+}
+html.bili-elite-searchpanel-opt .bili-header .histories .history-item {
+  height: 34px;
+  padding: 8px 14px;
+  font-size: 14px;
+  line-height: 18px;
+  border-radius: 10px;
+  background: #f1f2f3;
+  color: #18191c;
+  margin-right: 10px;
+  margin-bottom: 6px;
+}
+html.bili-elite-searchpanel-opt .bili-header .histories .history-item:hover,
+html.bili-elite-searchpanel-opt .bili-header .histories .history-item:focus {
+  background: #e3e5e7;
+  color: #00aeec;
+}
+html.bili-elite-searchpanel-opt .bili-header .histories .history-item .history-text {
+  max-width: 160px;
+}
+/* 展开按钮去掉：B 站原生的「展开更多 / 收起」（.history-fold-wrap，内含 .fold-icon）
+   一并隐藏，历史区恒定 4 行高，装不下时直接上下滚动 */
+html.bili-elite-searchpanel-opt .bili-header .history-fold-wrap {
+  display: none !important;
+}
+
+/* 热搜：左右留白与标题对齐，hover 用圆角高亮而不是整行铺满 */
+html.bili-elite-searchpanel-opt .bili-header .trending-item {
+  margin: 0 8px;
+  padding-left: 8px;
+  padding-right: 8px;
+  border-radius: 8px;
+}
+html.bili-elite-searchpanel-opt .bili-header .trending-item.active,
+html.bili-elite-searchpanel-opt .bili-header .trending-item:hover,
+html.bili-elite-searchpanel-opt .bili-header .trending-item:focus {
+  background: #f1f2f3;
+}
+
+/* 9.2 「搜索面板材质」（高级材质）：把白色底板换成毛玻璃 */
+html.bili-elite-searchpanel-glass .bili-header .search-panel {
+  background-color: rgba(255, 255, 255, var(--bili-searchpanel-tint, 0.76)) !important;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, calc(var(--bili-searchpanel-tint, 0.76) * 0.12)) 0%, rgba(255, 255, 255, 0) 70%) !important;
+  -webkit-backdrop-filter: blur(var(--bili-searchpanel-blur, 30px)) saturate(190%) brightness(1.06) !important;
+  backdrop-filter: blur(var(--bili-searchpanel-blur, 30px)) saturate(190%) brightness(1.06) !important;
+  border: 1px solid rgba(255, 255, 255, calc(var(--bili-searchpanel-tint, 0.76) * 0.7)) !important;
+  border-top: none !important;
+  box-shadow:
+    0 18px 44px rgba(20, 22, 30, calc(var(--bili-searchpanel-tint, 0.76) * 0.27)),
+    0 4px 12px rgba(20, 22, 30, calc(var(--bili-searchpanel-tint, 0.76) * 0.12)) !important;
+}
+/* 面板内的热搜 / 历史条目换成半透明底，避免在毛玻璃上出现不透明白块 */
+html.bili-elite-searchpanel-glass .bili-header .trending-item.active,
+html.bili-elite-searchpanel-glass .bili-header .trending-item:hover,
+html.bili-elite-searchpanel-glass .bili-header .trending-item:focus {
+  background: rgba(120, 120, 128, 0.12) !important;
+}
+html.bili-elite-searchpanel-glass .bili-header .histories .history-item {
+  background: rgba(120, 120, 128, 0.1) !important;
+}
+/* 搜索面板优化下，面板与搜索框分离，顶边同样要保留描边（B 站默认是 border-top:none） */
+html.bili-elite-searchpanel-glass.bili-elite-searchpanel-opt .bili-header .search-panel {
+  border-top: 1px solid rgba(255, 255, 255, calc(var(--bili-searchpanel-tint, 0.76) * 0.7)) !important;
+}
+
+/* ===== 10. 播放页右栏留白收起 ===== */
+/* B 站会在播放页右栏 .video-pod-above-modules__inner 里放一块约 411×235 的占位，
+   容器是 <div id="slide_ad" class="slide-ad slide-ad-exp">；class 会随状态增删
+   （有时只剩 .slide-ad-exp），只有 id 是稳定的，所以按 #slide_ad 定位。
+   内容没填充时它就是一块纯留白，直接 display:none 摘掉盒子，
+   右栏其余模块（弹幕列表等）自动上移，不留空隙。
+   由「界面优化 → 播放页右栏留白收起」控制，root class 挂在 <html> 上。 */
+html.bili-elite-rail-compact #slide_ad {
+  display: none !important;
+}
+
+/* ===== 10.1 顶部提示条收起 ===== */
+/* 页面顶部偶发一条 100% × 30px 的提示条：
+   <div class="adblock-tips"><p>…</p><img alt="close"></div>
+   adblock-tips 是 B 站自己的 class 名；节点上还有 data-v-xxxxxx 作用域属性，
+   但它会随 B 站构建变化，所以只按 class 定位。
+   它自带关闭按钮，点掉会写 cookie / localStorage 记账，下次进站还可能再来；
+   直接摘掉盒子更彻底。由「界面优化 → 顶部提示条收起」控制。 */
+html.bili-elite-notice-compact .adblock-tips {
+  display: none !important;
+}
+
+/* ===== 11. 首页预加载：提前把屏幕下方的推荐内容取回来 ===== */
+/* B 站的「加载更多」触发逻辑在 F6(e, t, n) 里：window 滚动（节流 200ms）时读加载哨兵
+   `.load-more-anchor` 的 getBoundingClientRect()，只要它的 bottom 落进
+   「视口底部 + 200px」以内就取下一批 —— 也就是「快滚到底才开始加载」，所以下滑时
+   总会先看到一段骨架 / 空白再出内容。
+   那 200px 写死在闭包里改不了，但判据读的是**元素当前的矩形**，而 transform 会改变
+   getBoundingClientRect() 的返回值（且不影响布局）。于是把哨兵整体上抬
+   `--bili-preload-dist`，它「看起来」离视口更近，B 站就提前同样距离开始加载 ——
+   内容还差将近一屏到底时，下一批已经取回来了。
+   `--bili-preload-dist` 由设置面板「界面优化 → 首页预加载」下的「预加载范围」滑块
+   控制（topbarOptimize.ts 写成 vh），设成 0 即等价于 B 站原生行为。
+   哨兵里那个骨架占位不能跟着一起上抬（会浮在别的卡片上面），所以给它的**子节点加
+   等量的反向位移**：哨兵自己的矩形被抬高、判据提前命中，而骨架仍然渲染在原位 ——
+   观感完全不变，也不会因为「把内容藏掉」而在栅格里多出一个空格子。
+   注意用 transform 而不是 margin：margin 会改变布局、连带改掉判据依赖的矩形。 */
+html.bili-elite-preload .recommended-container_floor-aside .load-more-anchor {
+  transform: translateY(calc(-1 * var(--bili-preload-dist, 80vh)));
+}
+html.bili-elite-preload .recommended-container_floor-aside .load-more-anchor > * {
+  transform: translateY(var(--bili-preload-dist, 80vh));
+}
+
+/* 11.1 这里原本有一条「预加载开启时把栅格尾部那批骨架整批隐藏」的规则，已删除：
+   那批骨架是「正在取回的那一批」的占位格，藏掉之后首屏 / 下滑过程中会露出一大片
+   空白（看图就是「没加载出来」）。现在改成把占位格画成带动画的视频占位卡（见 §16），
+   加载中一眼可辨，也不再需要隐藏。哨兵 `.load-more-anchor` 自己那格骨架同样保留，
+   §11 的反向位移让它仍然画在原位。 */
+
+/* ===== 12. 卡片边界 / 卡片确认：首页 · 搜索页 · 视频页右栏，六个独立开关 ===== */
+/* 三个页面 × 两个效果，一个开关一个 root class，互不依赖：
+   首页    html.bili-elite-card-border-home   / html.bili-elite-card-confirm-home
+   搜索页  html.bili-elite-card-border-search / html.bili-elite-card-confirm-search
+   视频页  html.bili-elite-card-border-video  / html.bili-elite-card-confirm-video
+   同一个页面里，「边界」管平时那圈灰色描边，「确认」管悬停时的灰色衬底 + 蓝色描边，
+   两者同样互不依赖（只开确认 → 平时没有边框；只开边界 → 悬停不变色）。
+
+   三个页面的几何量不一样，全部走 CSS 变量（§12.0 在每个作用域里各设一份），
+   下面几条规则因此只写一次声明：
+   - 首页：圆角 12 / 描边偏移 6 / 衬底外扩 6 —— 卡片本体透明，衬底直接铺在格子上；
+   - 搜索页：圆角 10 / 偏移 4 / 外扩 4 —— 描边离卡片留一点空隙，但不越过格子的 8px
+     内边距，所以相邻两张卡的描边之间还有 8px；
+   - 视频页：圆角 10 / 偏移 4 / 外扩 4 —— 350×80 的小横卡，行距只有 12px。
+
+   搜索页为什么不能照抄首页（两个坑，别改回去）：
+   1) 搜索页的格子是 `.col_3 …`，**自带 `padding: 0 8px`**，而 flex 换行时相邻格子的
+      边框盒是**紧贴的（间距 0）**。描边画在格子上再偏移 6px，左右两张卡会互相压住
+      12px —— 所以这里描在**里面那张 `.bili-video-card`** 上：卡片离格子边缘还有 8px，
+      偏移只要 < 8px 就吃不掉整段空隙。现在取 4px：描边与卡片内容之间留 4px，
+      两张卡之间还剩 16 − 4 − 4 = 8px（实测 `gapBetweenOutlines: 8`），不会重叠。
+   2) 搜索页的 `.bili-video-card__wrap` 是 `position: absolute` 且**带白底**
+      （首页那张是 static + 透明）。衬底铺在外层格子上会被这层白底整块盖住，表现就是
+      「灰色衬底上面蒙了一层白」—— 所以搜索页的衬底直接铺在 `__wrap` 上。
+
+   **衬底仍然只跟悬停走，绝不能改成默认值。** B 站在取下一批推荐时会在栅格尾部先摆
+   一批空占位格，衬底一旦默认打开，这些格子会被涂成一整块实心灰，看上去就像
+   「内容没加载出来 / 预加载失效」。
+   描边用 outline 而不是 border：outline 不参与布局 —— 既不会改变卡片尺寸，也不会挤动
+   栅格（栅格是按卡片宽度算列数的）。Chrome 的 outline 会跟随 border-radius 画圆角。
+   悬停时的衬底由两层拼成，两层也都不参与布局：
+   ① background-color 给卡片本体铺灰底（缩略图下方那截标题 / UP 主区域会变灰）；
+   ② box-shadow 的「0 模糊 + N px 扩散」把灰底再向外延展一圈，形成内边距观感 ——
+      这里不能用 padding，那会改布局、把卡片撑宽、连带改掉栅格列数。
+   两个状态都写满两条 box-shadow（默认那条是全透明的），这样进出悬停能平滑淡入淡出。
+   悬停不做 transform：卡片内部有 B 站的绝对定位浮层，加 transform 会给它们造出新的包含块。 */
+
+/* 12.0 三个作用域各设一份几何量（只在该页任一开关打开时生效） */
+html:is(.bili-elite-card-border-home, .bili-elite-card-confirm-home) .recommended-container_floor-aside .container {
+  --bili-card-radius: 12px;
+  --bili-card-offset: 6px;
+  --bili-card-spread: 6px;
+}
+html:is(.bili-elite-card-border-search, .bili-elite-card-confirm-search) .search-page .video-list {
+  --bili-card-radius: 10px;
+  /* 4px 是这套结构的「安全上限内」取值：描边画在卡片上，卡片离格子边缘还有 8px
+     内边距，所以 4px 只吃掉一半，两张卡之间仍留 8px 空隙（实测不会重叠） */
+  --bili-card-offset: 4px;
+  --bili-card-spread: 4px;
+}
+html:is(.bili-elite-card-border-video, .bili-elite-card-confirm-video) .recommend-list-v1 {
+  --bili-card-radius: 10px;
+  --bili-card-offset: 4px;
+  --bili-card-spread: 4px;
+}
+
+/* 12.1 公共几何量：圆角 / 过渡 / 默认无衬底（该页任一开关打开就生效） */
+html:is(.bili-elite-card-border-home, .bili-elite-card-confirm-home) .recommended-container_floor-aside .container > *:not(.load-more-anchor),
+html:is(.bili-elite-card-border-search, .bili-elite-card-confirm-search) .search-page .video-list .bili-video-card,
+html:is(.bili-elite-card-border-video, .bili-elite-card-confirm-video) .recommend-list-v1 .video-page-card-small {
+  border-radius: var(--bili-card-radius, 12px);
+  /* 默认无衬底：显式写 transparent / 全透明投影，退出悬停时才有东西可过渡 */
+  background-color: transparent;
+  box-shadow:
+    0 0 0 0 rgba(230, 233, 238, 0),
+    0 8px 20px rgba(20, 22, 30, 0);
+  transition:
+    outline-color 0.18s ease,
+    outline-width 0.18s ease,
+    box-shadow 0.18s ease,
+    background-color 0.18s ease;
+}
+/* 搜索页的衬底铺在 __wrap 上（见文件头说明），过渡也就写在它身上 */
+html:is(.bili-elite-card-border-search, .bili-elite-card-confirm-search) .search-page .video-list .bili-video-card__wrap {
+  border-radius: var(--bili-card-radius, 10px);
+  transition: background-color 0.18s ease;
+}
+
+/* 12.2 「卡片边界」：平时那圈灰色描边（三个页面各一条 root class）。
+   颜色比 B 站自己的 --line_regular(#e3e5e7) 略深一档，纯白底上要能一眼分辨。
+   首页的加载占位格也一起描（§16 会给它加上扫光动画）：占位格本身就是「一个还没填
+   内容的视频格」，只描真卡片会让尾部那几行看起来像几块浮在白底上的灰块。 */
+html.bili-elite-card-border-home .recommended-container_floor-aside .container > *:not(.load-more-anchor),
+html.bili-elite-card-border-search .search-page .video-list .bili-video-card,
+html.bili-elite-card-border-video .recommend-list-v1 .video-page-card-small {
+  outline: 1px solid #d3d9df;
+  outline-offset: var(--bili-card-offset, 6px);
+}
+/* 哨兵 `.load-more-anchor` 自己不能描边（§11 把它整块上抬了 --bili-preload-dist，
+   描边会跟着飘到上面去），但它里面就装着一个楼层骨架占位格 —— 那格现在也是可见的，
+   少了描边就会在尾部留下一格「没有边框的卡片」。它的子节点被 §11 反向位移回了原位，
+   所以把描边打在子节点上，位置正好。 */
+html.bili-elite-card-border-home .recommended-container_floor-aside .container > .load-more-anchor > * {
+  border-radius: 12px;
+  outline: 1px solid #d3d9df;
+  outline-offset: 6px;
+}
+
+/* 12.3 「卡片确认」：悬停时灰色衬底 + 蓝色描边 + 一层中性投影。
+   首页：加载占位格不参与 —— 它没有可点的内容，跟着变色只会让人误以为已经加载出来了。
+   这里用 `:not(:has(...))` 把三种骨架格排掉（`:has()` 放进 `:not()` 里是合法的，
+   不合法的是把 `:has()` 嵌进 `:has()`）；`.bili-video-card__skeleton` 必须带
+   `:not(.hide)`，否则「真卡片里常驻一个 `.hide` 骨架」的结构会被整批排掉。
+   真·直播间卡片内部的 `.bili-live-card__skeleton` 同样是 `.hide` 状态。
+   顶部轮播 `.recommended-swipe` 内部常驻一个非 `.hide` 的骨架，因此天然被排掉。
+   视频页右栏：卡片里没有骨架格，不需要排；行距 12px，所以衬底只外扩 4px。
+   搜索页：描边在卡片上、衬底在 __wrap 上（见文件头说明）；外扩是 0，
+   所以只需要那层投影，不用「衬底向外延展」的那一圈。 */
+html.bili-elite-card-confirm-home .recommended-container_floor-aside .container > *:not(.load-more-anchor):not(:has(.bili-video-card__skeleton:not(.hide))):not(:has(.floor-skeleton)):not(:has(.bili-live-card__skeleton:not(.hide))):hover,
+html.bili-elite-card-confirm-search .search-page .video-list .bili-video-card:hover,
+html.bili-elite-card-confirm-video .recommend-list-v1 .video-page-card-small:hover {
+  outline: 2px solid var(--brand_blue, #00aeec);
+  outline-offset: var(--bili-card-offset, 6px);
+  background-color: #e6e9ee;
+  box-shadow:
+    0 0 0 var(--bili-card-spread, 6px) #e6e9ee,
+    0 8px 20px rgba(20, 22, 30, 0.13);
+}
+/* 搜索页额外一步：卡片本体是透明的，真正盖住整张卡的是那层白底 __wrap，
+   所以衬底还得单独铺到它身上（主规则那层 background-color 被它盖住了）。 */
+html.bili-elite-card-confirm-search .search-page .video-list .bili-video-card:hover > .bili-video-card__wrap {
+  background-color: #e6e9ee;
+}
+
+/* ===== 13. 网页全屏 / 原生全屏：固定顶栏让位，视频铺满整屏 ===== */
+/* 「顶栏优化」把 .bili-header__bar 改成了 position:fixed，并给自绘 logo / 骨架栏
+   1002~1003 的 z-index。B 站自己的顶栏是留在文档流里、靠播放器盖住的，但我们的这几层
+   在网页全屏（B 站会给 body 加 .webscreen-fix）下会压在视频上方，视频顶部就露出一条
+   顶栏残留，看起来像「视频没有填满网页」。
+   这几层都是 position:fixed，不占文档流，隐藏它们不会引起回流，播放器的位置不受影响。
+   `html:fullscreen` 那条是给原生全屏（F）兜底：正常情况下全屏元素是播放器容器，
+   我们的层在它外面、本来就不会渲染。 */
+html.bili-elite-home-opt:has(body.webscreen-fix) .bili-header .bili-header__bar,
+html.bili-elite-home-opt:has(body.webscreen-fix) #bili-elite-logo,
+html.bili-elite-home-opt:has(body.webscreen-fix) #bili-elite-topbar-skeleton,
+html.bili-elite-home-opt:fullscreen .bili-header .bili-header__bar,
+html.bili-elite-home-opt:fullscreen #bili-elite-logo,
+html.bili-elite-home-opt:fullscreen #bili-elite-topbar-skeleton {
+  display: none !important;
+}
+
+/* ===== 15. 页面级「吸顶子栏」下移到顶栏下方 ===== */
+/* B 站各子页面自带一条贴在页面最顶部的吸顶工具栏（position: sticky + top: 0）——
+   原生顶栏会随页面滚走，所以它 top: 0 本来是对的；但我们的顶栏是 fixed、占住
+   0–64px 且 z-index 更高（1002），这条子栏就会钻到顶栏底下：既看不见（也点不到），
+   又让顶栏的毛玻璃采到一块静止的白底 —— 表现就是「向下滑一小段后顶栏的实时模糊
+   没了，变成一块不动的白」。这里统一把它们下移到顶栏下方：子栏重新可见，顶栏毛玻璃
+   也重新采到「正在滚动的页面内容」。
+   标记由脚本按「sticky + top:0 + 高 24–200 + 宽 ≥ 视口 60%」自动打，只扫 body 往下
+   6 层（见 topbarOptimize.ts 的 ensureUnderTopbar），B 站以后新加子栏也能覆盖。
+   注：个人空间（.nav-bar.space-navbar）与历史记录页（.history-record
+   .main-breadcrumbs）这两个已知案例现在整页排除顶栏改造（见 isTopbarOptExcluded），
+   顶栏是 B 站原版、子栏按原生 top: 0 工作，不需要下移。 */
+html.bili-elite-home-opt .bili-elite-under-topbar {
+  top: 64px !important;
+}
+
+/* ===== 16. 首页加载占位：骨架格 → 带动画的视频占位卡 ===== */
+/* B 站在推荐栅格尾部常驻一批空骨架格（`.bili-video-card__skeleton` /
+   `.floor-skeleton`），占住「正在取回的那一批」的格子；`.load-more-anchor` 里那个
+   楼层骨架就是加载哨兵自己的占位格。原生样式是一块**静止**的浅灰（#f1f2f3）——
+   首屏没加载完时，那几行就是三排一动不动的灰块，看起来像「卡住了 / 内容没出来」，
+   而不是「正在加载」。
+   这里只做两件事，都不改结构、不加 JS：
+   1) 把浅灰底换成一条扫过的高光（shimmer），加载中一眼可辨；
+   2) 楼层骨架的封面补上和视频骨架一致的 6px 圆角，两种占位格看起来是同一类东西。
+   扫光的做法：渐变图宽度是格子的两倍（`background-size: 200% 100%`），中间一小段
+   提亮、两侧与底色同色；再让 `background-position` 在 100% ↔ 0% 之间来回移动，
+   等于把这条提亮带从左扫到右。**底色不能写成透明**：透明渐变会让整块在亮带经过时
+   变成纯白，反而看不出是占位格。
+   背景必须写成 `background-image` + `background-size` 的组合，**不能只写 `background`
+   简写** —— B 站自己的 `background-color` 还在，简写会把它一起重置掉。
+
+   **动画只给尾部楼层骨架，卡片骨架不动**（性能优化）：卡片里的
+   `.bili-video-card__skeleton--*` 在内容加载完之后**不会从 DOM 里消失**，只是塌成
+   0×0。给它们挂 `animation: … infinite` 的结果是首页常驻 60 个 `background-position`
+   动画一直在跑（`document.getAnimations()` 实测 63 个），而 `background-position`
+   是非合成属性、每帧都要重绘 —— 实测空闲主线程占用从 0.6% 涨到 35%。尾部楼层骨架
+   只有 3 个、且正是「在加载」的那几格，动画留在它身上既不影响观感也不吃性能。 */
+html.bili-elite-home-opt .recommended-container_floor-aside .bili-video-card__skeleton--cover,
+html.bili-elite-home-opt .recommended-container_floor-aside .bili-video-card__skeleton--text,
+html.bili-elite-home-opt .recommended-container_floor-aside .bili-video-card__skeleton--light,
+html.bili-elite-home-opt .recommended-container_floor-aside .floor-skeleton .skeleton-item {
+  background-color: #e9ecf0 !important;
+  background-image: linear-gradient(
+    90deg,
+    #e9ecf0 42%,
+    #f5f7fa 50%,
+    #e9ecf0 58%
+  ) !important;
+  background-repeat: no-repeat !important;
+  background-size: 200% 100% !important;
+}
+
+/* 只有尾部楼层骨架扫光 —— 真正「正在加载」的那几格 */
+html.bili-elite-home-opt .recommended-container_floor-aside .floor-skeleton .skeleton-item {
+  animation: bili-elite-skeleton-shimmer 1.6s linear infinite !important;
+}
+
+@keyframes bili-elite-skeleton-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+
+/* 楼层骨架的封面原生是直角，和视频骨架的 6px 圆角对不上 */
+html.bili-elite-home-opt .recommended-container_floor-aside .floor-skeleton .skeleton-item.cover {
+  border-radius: 6px;
+}
+
+/* 尊重系统的「减少动态效果」：关掉扫光，退回静态占位 */
+@media (prefers-reduced-motion: reduce) {
+  html.bili-elite-home-opt .recommended-container_floor-aside .bili-video-card__skeleton--cover,
+  html.bili-elite-home-opt .recommended-container_floor-aside .bili-video-card__skeleton--text,
+  html.bili-elite-home-opt .recommended-container_floor-aside .bili-video-card__skeleton--light,
+  html.bili-elite-home-opt .recommended-container_floor-aside .floor-skeleton .skeleton-item {
+    animation: none !important;
+    background-image: none !important;
+  }
+}

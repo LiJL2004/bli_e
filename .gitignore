@@ -15,3 +15,14 @@ node_modules
 src/auto-imports.d.ts
 src/components.d.ts
 .eslintcache
+
+# 本地私有：AI 记忆 / 工作日志，不进版本库
+.workbuddy-ai/
+
+# 内部开发笔记（含 B 站 DOM 细节与实现取舍），想公开就删掉这一行
+.opencode/
+
+# 打包产物与私钥（*.pem / *.zip / *.crx 已在上面统一忽略）
+extension.zip
+extension.crx
+key.pem

@@ -1,0 +1,628 @@
+/* 悬浮按钮 */
+.btn {
+  width: 44px; height: 44px; border-radius: 50%;
+  background: linear-gradient(135deg, #4C9BFF 0%, #0A6CFF 100%);
+  box-shadow: 0 6px 18px rgba(10, 108, 255, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; color: #fff;
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.22s ease;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn:hover {
+  transform: scale(1.08);
+  box-shadow: 0 8px 22px rgba(10, 108, 255, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+.btn:active {
+  transform: scale(0.88, 0.94);
+  box-shadow: 0 4px 14px rgba(10, 108, 255, 0.42), 0 0 0 8px rgba(10, 108, 255, 0.16);
+}
+
+/* 透明遮罩：只拦点击，不做任何视觉处理（无背景、无 backdrop-filter，不产生重绘）。
+   关闭时 pointer-events:none，页面对它零感知；打开时接管所有面板外的点击，
+   事件根本到不了页面元素，因此不会误触视频卡片 / 链接。 */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  background: transparent;
+  pointer-events: none;
+}
+.overlay.show { pointer-events: auto; }
+
+/* 面板：磨砂玻璃卡片 + 打开/关闭动画（屏幕正中央弹出，横向宽版） */
+.panel {
+  position: fixed;
+  top: 50%; left: 50%;
+  z-index: 2;
+  /* 整体缩放：--bili-panel-scale 由「界面优化 → 设置面板缩放」滑块写入（1 = 100%）。
+     基准宽高按缩放反算，保证放大后仍然装得进视口。 */
+  --z: var(--bili-panel-scale, 1);
+  width: min(1000px, calc((100vw - 48px) / var(--z)));
+  box-sizing: border-box;
+  padding: 14px;
+  border-radius: 18px;
+  font-family: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif;
+
+  /* 固定尺寸：切分类时面板不再变形，内容不够就留空，超出由内容区滚动 */
+  display: flex;
+  flex-direction: column;
+  height: min(660px, calc((100vh - 120px) / var(--z)));
+  overflow: hidden;
+
+  /* 默认（「设置面板材质」关闭）：不透明卡片 */
+  background: #F7F7FA;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow:
+    0 10px 28px rgba(20, 22, 30, 0.18),
+    0 2px 8px rgba(20, 22, 30, 0.08);
+
+  transform-origin: center center;
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(-50%, calc(-50% + 12px)) scale(calc(0.94 * var(--z)));
+  pointer-events: none;
+  transition:
+    opacity 0.2s ease,
+    transform 0.26s cubic-bezier(0.34, 1.4, 0.5, 1),
+    visibility 0s linear 0.26s;
+}
+
+/* 设置面板材质：iOS 风格毛玻璃。
+   模糊 / 遮罩强度走 CSS 变量（--bili-panel-blur / --bili-panel-tint），
+   遮罩为 0 时连同发丝描边与投影一起淡出。 */
+.panel.is-glass {
+  background-color: rgba(255, 255, 255, var(--bili-panel-tint, 0.82));
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, calc(var(--bili-panel-tint, 0.82) * 0.08)) 0%, rgba(248, 248, 252, 0) 100%);
+  backdrop-filter: blur(var(--bili-panel-blur, 30px)) saturate(190%) brightness(1.06);
+  -webkit-backdrop-filter: blur(var(--bili-panel-blur, 30px)) saturate(190%) brightness(1.06);
+  border: 1px solid rgba(255, 255, 255, calc(var(--bili-panel-tint, 0.82) * 0.8));
+  box-shadow:
+    0 18px 44px rgba(20, 22, 30, calc(var(--bili-panel-tint, 0.82) * 0.27)),
+    0 4px 12px rgba(20, 22, 30, calc(var(--bili-panel-tint, 0.82) * 0.12)),
+    inset 0 1px 0 rgba(255, 255, 255, calc(var(--bili-panel-tint, 0.82) * 1.04));
+}
+
+.panel.show {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, -50%) scale(var(--z));
+  pointer-events: auto;
+  transition:
+    opacity 0.18s ease,
+    transform 0.28s cubic-bezier(0.34, 1.5, 0.5, 1),
+    visibility 0s;
+}
+
+/* 标题栏：左标题 + 右上角关闭按钮 */
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 2px 2px 10px;
+}
+
+.title {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex; align-items: center; gap: 8px;
+  font-size: 16px; font-weight: 700; color: #1c1c1e;
+  /* 标题现在是中文（设置面板），不要拉丁字母那套负字距 */
+  letter-spacing: 0;
+}
+
+/* 关闭按钮：与面板同一套圆角 / 灰度 / 弹性手感 */
+.close {
+  flex-shrink: 0;
+  width: 28px; height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #8E8E93;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.close:hover { background: rgba(120, 120, 128, 0.14); color: #1c1c1e; }
+.close:active { background: rgba(120, 120, 128, 0.22); transform: scale(0.9); }
+.close:focus-visible { outline: 2px solid rgba(10, 108, 255, 0.55); outline-offset: 1px; }
+.close svg { display: block; }
+
+/* 主体：左侧分类按钮 + 右侧对应设置项 */
+.panel-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.nav {
+  flex: 0 0 176px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 分类按钮：本面板的圆角 / 灰度。
+   选中态的蓝色底不做「瞬间变色」，而是从左到右刷出来：底色做成一张纯色渐变图，
+   用 background-size 从 0% 长到 100% 就是一次横向擦除，再加 transition 就有过渡。
+   注意**不能用 background 简写**：它会把 background-image / background-size 一起重置，
+   擦除动画和 hover 的灰底就都失效了。 */
+.nav-item {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 10px;
+  background-color: transparent;
+  background-image: linear-gradient(90deg, rgba(10, 108, 255, 0.1), rgba(10, 108, 255, 0.1));
+  background-repeat: no-repeat;
+  background-position: left center;
+  background-size: 0% 100%;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  text-align: left;
+  color: #1c1c1e;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color 0.18s ease,
+    background-size 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+    color 0.18s ease;
+}
+.nav-item:hover { background-color: rgba(120, 120, 128, 0.1); }
+.nav-item.is-active {
+  background-size: 100% 100%;
+  color: #0A6CFF;
+  font-weight: 600;
+}
+/* 选中 + 悬停：保留蓝色擦除层，不再叠灰 */
+.nav-item.is-active:hover { background-color: transparent; }
+.nav-item:focus-visible { outline: 2px solid rgba(10, 108, 255, 0.55); outline-offset: 1px; }
+
+/* 右侧内容：同一时刻只显示选中分类的那一页 */
+.panel-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(60, 60, 67, 0.28) transparent;
+  padding-right: 8px;
+  margin-right: -8px;
+}
+.panel-body::-webkit-scrollbar { width: 8px; }
+.panel-body::-webkit-scrollbar-track { background: transparent; }
+.panel-body::-webkit-scrollbar-thumb {
+  background: rgba(60, 60, 67, 0.22);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.panel-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(60, 60, 67, 0.38);
+  background-clip: padding-box;
+}
+
+.page { display: none; }
+.page.is-active { display: block; }
+
+/* 分组：按可用宽度自动铺列（宽 3 列、中 2 列、窄 1 列）。
+   纯开关的卡片（.is-plain）横跨整行，读起来仍是一行一项。 */
+.group {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 8px;
+}
+
+/* 每个功能一张独立小卡片：开关 + 它的滑块都在同一张卡片里 */
+.setting-block {
+  position: relative;
+  background: #FFFFFF;
+  /* 四周等粗的描边定轮廓，不用投影：投影带 y 偏移，永远只有右边和下边明显，
+     背景一白就像卡片歪着放。描边是四边等价的，白底上也看得见。 */
+  border: 1px solid rgba(20, 22, 30, 0.12);
+  border-radius: 13px;
+  overflow: hidden;
+}
+.setting-block.is-plain { grid-column: 1 / -1; }
+/* 带滑块、但需要整行铺满的卡片（如「首页预加载」）：与「设置面板缩放」同宽 */
+.setting-block.is-wide { grid-column: 1 / -1; }
+/* 毛玻璃模式下，卡片随遮罩强度一起淡出。
+   描边同样按 tint 缩放：遮罩拉到 0 时面板变全透明，卡片不该还留一圈灰线；
+   而在「面板底、页面底都是白」的默认状态下，0.16 × 0.82 ≈ 0.13 的黑，
+   四边都够看清（纯白底上约等于 #DEDFE1）。 */
+.panel.is-glass .setting-block {
+  background: rgba(255, 255, 255, calc(var(--bili-panel-tint, 0.82) * 0.88));
+  border-color: rgba(20, 22, 30, calc(var(--bili-panel-tint, 0.82) * 0.16));
+}
+
+.item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 12px;
+  position: relative;
+  transition: background 0.18s ease;
+}
+.item:hover { background: rgba(120, 120, 128, 0.06); }
+/* 同一张卡片内的行分隔线（开关与其滑块之间、滑块之间） */
+.setting-block > .item:not(:last-child)::after {
+  content: '';
+  position: absolute; bottom: 0; left: 12px; right: 0;
+  height: 0.5px; background: rgba(60, 60, 67, 0.16);
+}
+
+/* 文字统一：开关标签与滑块标签同字号、同行高、同颜色 */
+.label {
+  font-size: 14px;
+  line-height: 20px;
+  color: #1c1c1e;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.switch { position: relative; width: 44px; height: 26px; flex-shrink: 0; }
+.switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+.track {
+  position: absolute; inset: 0;
+  background: #E4E4E9; border-radius: 26px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.08);
+  transition: background 0.32s ease, box-shadow 0.32s ease, transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+  cursor: pointer;
+  overflow: hidden;
+}
+/* 液面高光：开启后缓慢来回流动，形成“液体”质感 */
+.track::before {
+  content: '';
+  position: absolute; inset: 0;
+  border-radius: inherit;
+  background-image: linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.45) 50%, rgba(255, 255, 255, 0) 100%);
+  background-size: 220% 100%;
+  background-repeat: no-repeat;
+  opacity: 0;
+  transition: opacity 0.32s ease;
+  animation: switch-fluid 3.2s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+.thumb {
+  position: absolute;
+  height: 22px; width: 22px;
+  left: 2px; bottom: 2px;
+  background: radial-gradient(circle at 50% 32%, #FFFFFF 0%, #F2F7FF 100%);
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.34s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+input:checked + .track {
+  background: linear-gradient(135deg, #4C9BFF 0%, #0A6CFF 100%);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06), 0 0 12px rgba(10, 108, 255, 0.45);
+}
+input:checked + .track::before { opacity: 1; }
+input:checked + .track .thumb { transform: translateX(18px); }
+
+/* 按下：整体轻微下压，拇指被“挤”成液滴椭圆 */
+.switch:active .track { transform: scale(0.94); }
+.switch:active .thumb { transform: scaleX(1.32); }
+.switch:active input:checked + .track .thumb { transform: translateX(18px) scaleX(1.32); }
+
+@keyframes switch-fluid {
+  from { background-position: 0% 0; }
+  to { background-position: 100% 0; }
+}
+
+/* 毛玻璃参数滑块 */
+.item-range {
+  display: block;
+  padding: 9px 12px 11px;
+}
+.range-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 4px;
+}
+.range-val {
+  font-size: 12px;
+  color: #8E8E93;
+  font-variant-numeric: tabular-nums;
+  transition: color 0.2s ease;
+}
+.item-range:hover .range-val { color: #5b5b60; }
+
+/* 滑块下方的小字说明：解释这个数值代表什么（如「100% ≈ 1 屏」） */
+.range-hint {
+  margin-top: 5px;
+  font-size: 11.5px;
+  line-height: 15px;
+  color: #8E8E93;
+  transition: color 0.2s ease;
+}
+.item-range:hover .range-hint { color: #6c6c72; }
+
+/* 轨道：底槽 + 蓝色液体填充。填充由 .range-wrap 绘制，input 只负责拖拽 */
+.range-wrap {
+  position: relative;
+  height: 20px;
+}
+.range-wrap::before {
+  content: '';
+  position: absolute; left: 0; right: 0; top: 7px; height: 6px;
+  border-radius: 999px;
+  background: #E4E4E9;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.07);
+}
+.range-wrap::after {
+  content: '';
+  position: absolute; left: 0; top: 7px; height: 6px;
+  width: var(--p, 50%);
+  border-radius: 999px;
+  background-image: linear-gradient(90deg, #0A6CFF 0%, #4C9BFF 45%, #0A6CFF 90%, #0A6CFF 100%);
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  animation: range-fluid 3s ease-in-out infinite alternate;
+  transition: width 0.06s linear, box-shadow 0.2s ease;
+  z-index: 1;
+  pointer-events: none;
+}
+/* 拖动时液体更亮、流动更快，渗出蓝色光晕 */
+.item-range:active .range-wrap::after {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    0 0 10px rgba(10, 108, 255, 0.5);
+  animation-duration: 1.4s;
+}
+
+.range {
+  position: relative;
+  z-index: 2;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 20px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* WebKit */
+.range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: transparent;
+}
+.range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px; height: 18px; margin-top: -6px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 32%, #FFFFFF 0%, #EAF2FF 65%, #D8E8FF 100%);
+  border: 1px solid rgba(10, 108, 255, 0.28);
+  box-shadow: 0 1px 4px rgba(10, 60, 140, 0.3);
+  transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.22s ease;
+}
+.range:hover::-webkit-slider-thumb {
+  transform: scale(1.12);
+  box-shadow: 0 2px 6px rgba(10, 60, 140, 0.32), 0 0 0 5px rgba(10, 108, 255, 0.14);
+}
+/* 拖动：拇指被拉成液滴，蓝色光晕扩散 */
+.range:active::-webkit-slider-thumb {
+  transform: scale(1.26, 1.06);
+  box-shadow: 0 2px 8px rgba(10, 60, 140, 0.36), 0 0 0 8px rgba(10, 108, 255, 0.18);
+}
+.range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 1px 4px rgba(10, 60, 140, 0.3), 0 0 0 5px rgba(10, 108, 255, 0.22);
+}
+
+/* Firefox */
+.range::-moz-range-track {
+  height: 6px; border-radius: 999px; background: transparent;
+}
+.range::-moz-range-progress {
+  height: 6px; border-radius: 999px; background: transparent;
+}
+.range::-moz-range-thumb {
+  width: 18px; height: 18px; border-radius: 50%;
+  background: radial-gradient(circle at 50% 32%, #FFFFFF 0%, #EAF2FF 65%, #D8E8FF 100%);
+  border: 1px solid rgba(10, 108, 255, 0.28);
+  box-shadow: 0 1px 4px rgba(10, 60, 140, 0.3);
+  transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.22s ease;
+}
+.range:hover::-moz-range-thumb {
+  transform: scale(1.12);
+  box-shadow: 0 2px 6px rgba(10, 60, 140, 0.32), 0 0 0 5px rgba(10, 108, 255, 0.14);
+}
+.range:active::-moz-range-thumb {
+  transform: scale(1.26, 1.06);
+  box-shadow: 0 2px 8px rgba(10, 60, 140, 0.36), 0 0 0 8px rgba(10, 108, 255, 0.18);
+}
+
+@keyframes range-fluid {
+  from { background-position: 0% 0; }
+  to { background-position: 100% 0; }
+}
+
+/* 所属开关关闭：滑块整体变灰、不可调节 */
+.item-range.is-disabled {
+  opacity: 0.5;
+  filter: grayscale(1);
+}
+.item-range.is-disabled .range,
+.item-range.is-disabled .range-val { cursor: not-allowed; }
+.item-range.is-disabled .range-val { color: #b6b6bb; }
+.range:disabled::-webkit-slider-thumb,
+.range:disabled::-moz-range-thumb {
+  transform: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+
+/* ===== 设置管理（「界面优化」页末尾） ===== */
+
+/* 卡片内的小标题：比正文小一档、灰一档，下缘与开关行用同一条左内缩的发丝线 */
+.block-head {
+  position: relative;
+  padding: 11px 12px;
+  font-size: 12px;
+  line-height: 16px;
+  color: #8E8E93;
+  letter-spacing: 0.2px;
+}
+.block-head::after {
+  content: '';
+  position: absolute; bottom: 0; left: 12px; right: 0;
+  height: 0.5px; background: rgba(60, 60, 67, 0.16);
+}
+
+/* 「重置」按钮：沿用分类按钮选中态的浅蓝底 + 品牌蓝字，比实心按钮轻一档，
+   放在白色卡片里不抢视觉；确认动作交给弹窗，所以这里不用红色。 */
+.text-btn {
+  flex-shrink: 0;
+  height: 26px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(10, 108, 255, 0.14);
+  color: #0A6CFF;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 26px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background 0.18s ease,
+    transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.text-btn:hover { background: rgba(10, 108, 255, 0.2); }
+.text-btn:active { background: rgba(10, 108, 255, 0.26); transform: scale(0.94); }
+.text-btn:focus-visible { outline: 2px solid rgba(10, 108, 255, 0.55); outline-offset: 1px; }
+
+/* ===== 「是否恢复默认设置」确认弹窗 ===== */
+
+/* 暗色遮罩：盖在面板之上（面板 z-index 2，这里 3）。
+   不加 backdrop-filter —— 全屏模糊整页代价太大，和 .overlay 的思路保持一致。 */
+.confirm-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 22, 30, 0.28);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.18s ease, visibility 0s linear 0.18s;
+}
+.confirm-mask.show {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 0.18s ease, visibility 0s;
+}
+
+/* 弹窗卡片：与设置面板同一套圆角 / 描边 / 投影 / 缩放倍率，
+   宽度同样按 --z 反算，放大面板时弹窗跟着一起放大 */
+.confirm {
+  --z: var(--bili-panel-scale, 1);
+  box-sizing: border-box;
+  width: min(320px, calc((100vw - 64px) / var(--z)));
+  padding: 20px 20px 16px;
+  border-radius: 16px;
+  background: #FFFFFF;
+  border: 1px solid rgba(20, 22, 30, 0.12);
+  box-shadow:
+    0 16px 40px rgba(20, 22, 30, 0.22),
+    0 3px 10px rgba(20, 22, 30, 0.1);
+  font-family: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif;
+  text-align: center;
+  transform: scale(calc(0.94 * var(--z)));
+  transition: transform 0.26s cubic-bezier(0.34, 1.5, 0.5, 1);
+}
+.confirm-mask.show .confirm { transform: scale(var(--z)); }
+
+/* 毛玻璃模式：弹窗跟面板一起变材质（--bili-panel-blur / --bili-panel-tint 由
+   settingsPanel 的 applyPanelParams() 写在 documentElement 上）。
+   遮罩强度用 max() 兜一个下限：面板大面积透明好看，但弹窗是几行字，透到 31% 就难读了。 */
+.confirm-mask.is-glass .confirm {
+  background-color: rgba(255, 255, 255, max(0.74, var(--bili-panel-tint, 0.82)));
+  backdrop-filter: blur(var(--bili-panel-blur, 30px)) saturate(190%) brightness(1.06);
+  -webkit-backdrop-filter: blur(var(--bili-panel-blur, 30px)) saturate(190%) brightness(1.06);
+  border-color: rgba(255, 255, 255, calc(var(--bili-panel-tint, 0.82) * 0.8));
+  box-shadow:
+    0 18px 44px rgba(20, 22, 30, max(0.16, calc(var(--bili-panel-tint, 0.82) * 0.27))),
+    0 4px 12px rgba(20, 22, 30, max(0.1, calc(var(--bili-panel-tint, 0.82) * 0.12))),
+    inset 0 1px 0 rgba(255, 255, 255, calc(var(--bili-panel-tint, 0.82) * 1.04));
+}
+
+.confirm-title {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 21px;
+  color: #1c1c1e;
+}
+.confirm-desc {
+  margin-top: 7px;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: #8E8E93;
+}
+.confirm-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+/* 次要（取消）：灰底，和面板里其它「非主操作」同一档灰度 */
+.confirm-btn {
+  flex: 1 1 0;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(120, 120, 128, 0.1);
+  color: #1c1c1e;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background 0.18s ease,
+    box-shadow 0.2s ease,
+    transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.confirm-btn:hover { background: rgba(120, 120, 128, 0.16); }
+.confirm-btn:active { transform: scale(0.97); }
+.confirm-btn:focus-visible { outline: 2px solid rgba(10, 108, 255, 0.55); outline-offset: 1px; }
+
+/* 主要（确定）：与悬浮球 / 开关开启态同一条蓝色渐变 */
+.confirm-btn.is-primary {
+  background: linear-gradient(135deg, #4C9BFF 0%, #0A6CFF 100%);
+  color: #FFFFFF;
+  box-shadow:
+    0 4px 12px rgba(10, 108, 255, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+.confirm-btn.is-primary:hover {
+  background: linear-gradient(135deg, #4C9BFF 0%, #0A6CFF 100%);
+  box-shadow:
+    0 6px 16px rgba(10, 108, 255, 0.44),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+/* 最末一行「开发版本」标记：小字、右对齐、灰得几乎不打扰，但能选中复制 */
+.dev-version {
+  padding: 2px 6px 0;
+  font-size: 11px;
+  line-height: 1.7;
+  color: rgba(20, 22, 30, 0.36);
+  text-align: right;
+  user-select: text;
+}

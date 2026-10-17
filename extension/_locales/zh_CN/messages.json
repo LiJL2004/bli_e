@@ -1,0 +1,10 @@
+{
+  "extensionName": {
+    "message": "奶睿pro",
+    "description": "扩展名称，显示在扩展管理页与商店"
+  },
+  "extensionDescription": {
+    "message": "B 站页面布局与视觉优化扩展",
+    "description": "扩展简介，显示在扩展管理页"
+  }
+}

@@ -1,30 +1,45 @@
-/* eslint-disable no-console */
-import { onMessage } from 'webext-bridge/content-script'
-import { createApp } from 'vue'
-import App from './views/App.vue'
-import { setupApp } from '~/logic/common-setup'
+import './styles.css'
+import { bootstrapConfig } from './config'
+import { bootstrapGlassConfig } from './modules/glassConfig'
+import { setupImageGlass } from './modules/imageGlass'
+import { setupImageViewer } from './modules/imageViewer'
+import { setupImageStyle } from './modules/imageStyle'
+import { bootstrapPanelConfig } from './modules/panelConfig'
+import { bootstrapPanelScaleConfig } from './modules/panelScaleConfig'
+import { bootstrapPreloadConfig } from './modules/preloadConfig'
+import { bootstrapSearchConfig } from './modules/searchConfig'
+import { setupSearchPanelOpt } from './modules/searchPanelOpt'
+import { setupSettingsPanel } from './modules/settingsPanel'
+import { bootstrapTopbarConfig } from './modules/topbarConfig'
+import { setupTopbarOptimize } from './modules/topbarOptimize'
+import { setupVideoFullscreen } from './modules/videoFullscreen'
 
-// Firefox `browser.tabs.executeScript()` requires scripts return a primitive value
-(() => {
-  console.info('[vitesse-webext] Hello world from content script')
+bootstrapConfig()
+bootstrapGlassConfig()
+bootstrapTopbarConfig()
+bootstrapPanelConfig()
+bootstrapPanelScaleConfig()
+bootstrapPreloadConfig()
+bootstrapSearchConfig()
 
-  // communication example: send previous tab title from background page
-  onMessage('tab-prev', ({ data }) => {
-    console.log(`[vitesse-webext] Navigate from page "${data.title}"`)
-  })
+// 顶栏优化必须在 document_start 立即注入：否则 B 站自身顶栏会先渲染一帧，
+// 造成「旧顶栏残留 / 闪烁」。样式本身按需生效（无 .bili-header 时不匹配）。
+setupTopbarOptimize()
 
-  // mount component to context window
-  const container = document.createElement('div')
-  container.id = __NAME__
-  const root = document.createElement('div')
-  const styleEl = document.createElement('link')
-  const shadowDOM = container.attachShadow?.({ mode: __DEV__ ? 'open' : 'closed' }) || container
-  styleEl.setAttribute('rel', 'stylesheet')
-  styleEl.setAttribute('href', browser.runtime.getURL('dist/contentScripts/style.css'))
-  shadowDOM.appendChild(styleEl)
-  shadowDOM.appendChild(root)
-  document.body.appendChild(container)
-  const app = createApp(App)
-  setupApp(app)
-  app.mount(root)
-})()
+// 搜索面板优化：根类尽早挂上，避免用户刚聚焦搜索框时看到一帧未改版的默认面板
+setupSearchPanelOpt()
+
+function initModules() {
+  setupVideoFullscreen()
+  setupImageViewer()
+  setupImageStyle()
+  setupImageGlass()
+  setupSettingsPanel()
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initModules, { once: true })
+}
+else {
+  initModules()
+}
