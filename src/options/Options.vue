@@ -26,7 +26,7 @@ function openBilibili() {
         <li>顶栏、搜索面板、卡片效果：首页 / 搜索页 / 播放页</li>
         <li>全屏切换动画：播放页、直播页</li>
         <li>图片开合动画：评论区、动态页相册</li>
-        <li>一键恢复默认：设置面板 → 界面优化 → 设置管理</li>
+        <li>一键恢复默认：设置面板 → 个性设置 → 设置管理</li>
       </ul>
 
       <button class="cta" type="button" @click="openBilibili">

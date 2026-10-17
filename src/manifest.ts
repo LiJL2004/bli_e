@@ -21,7 +21,9 @@ export async function getManifest() {
         32: 'assets/icon-48.png',
         48: 'assets/icon-48.png',
       },
-      default_popup: 'dist/popup/index.html',
+      // 刻意不设 default_popup：设置面板已经做在页面里（右下角 ⚙），再挂一个工具栏弹窗
+      // 就是两套 UI 要同步维护。不设 popup 时点图标走浏览器自己的扩展菜单
+      // （Edge 会直接列出「网站访问权限 / 管理扩展」等默认项）。
     },
     options_ui: {
       page: 'dist/options/index.html',

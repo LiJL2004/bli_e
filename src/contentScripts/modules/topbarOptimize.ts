@@ -620,7 +620,12 @@ function syncPreloadAnchor() {
   }
   preloadObserver = new IntersectionObserver((entries) => {
     for (const e of entries) {
-      if (e.isIntersecting) startKeepAlive()
+      // 哨兵被 §11 上抬了 --bili-preload-dist（默认 150vh），所以「滚到真实底部」时它
+      // 反而落在视口**上方**：这时 isIntersecting 是 false，但 B 站自己的判据
+      // （rect.bottom <= 视口底 + 200）依然成立 —— 保活定时器必须继续跑。
+      // 漏了这一条，用户停在底部不动就再也收不到 scroll，骨架会一直挂着
+      // （点「刷新」之后尤其明显：新信息流一进来，视口位置和哨兵位置全变了）。
+      if (e.isIntersecting || e.boundingClientRect.bottom < 0) startKeepAlive()
       else stopKeepAlive()
     }
   }, { rootMargin: '0px 0px 200px 0px' })
