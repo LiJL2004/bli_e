@@ -1,17 +1,13 @@
 # 奶睿pro
 
-> 哔哩哔哩增强浏览器扩展 · **v1.0.0**
+> B 站页面布局与视觉优化扩展 · **v1.0.1**
 > 顶栏重做、全屏 / 图片开合动效、iOS 毛玻璃材质、搜索面板与首页信息流优化。
 
-- Manifest V3，Chrome / Edge（Chromium 内核）与 Firefox 均可加载
-- 所有功能都在一个 content script 里，注入 `*://*.bilibili.com/*`，`document_start` 执行
-- 设置入口：**B 站任意页面右下角的 ⚙ 按钮**（工具栏图标弹窗里也有开关）
-
----
+设置入口：**B 站任意页面右下角的 ⚙ 按钮**（工具栏图标弹窗里也有一份开关）。
 
 ## 一、功能总览
 
-设置面板分三组：**动效增强 / 高级材质 / 界面优化**。下表是全部功能，`key` 是 `src/shared/features.ts` 里的开关标识。
+设置面板分三组：**动效增强 / 高级材质 / 界面优化**。下表是全部功能，`key` 列是内部开关标识（开发用）。
 
 ### 动效增强
 
@@ -69,100 +65,6 @@
 
 ---
 
-## 二、安装 / 构建
-
-```bash
-pnpm install
-pnpm build          # 产物在 extension/
-```
-
-1. 打开 `chrome://extensions`（Edge 用 `edge://extensions`）
-2. 打开「开发者模式」
-3. 「加载已解压的扩展程序」→ 选择仓库里的 **`extension/` 目录**（不是 `extension/dist`）
-4. 改了代码之后重新 `pnpm build`，再在扩展页点一次「刷新」
-
-开发模式：`pnpm dev` 会 watch 构建，`pnpm dev-firefox` 出 Firefox 版；`pnpm typecheck` 做类型检查。
-
-> `extension/manifest.json` 是构建时由 `src/manifest.ts` 生成的，**不要手改**。
-
----
-
-## 三、更换图标
-
-图标是仓库里两个静态文件，不参与打包逻辑：
-
-```
-extension/assets/icon-512.png     ← 真正生效的那个（512×512 PNG）
-extension/assets/icon.svg         ← 设计源文件（当前未被 manifest 引用）
-```
-
-**最省事的换法**：直接用你自己的 512×512 PNG 覆盖 `extension/assets/icon-512.png`，
-然后 `pnpm build` + 在扩展页点「刷新」。manifest 里 16 / 48 / 128 三个尺寸都指向这张图，
-浏览器会自己缩放，够用。
-
-**想要每个尺寸都清晰**（推荐正式发布时这么做）：
-
-1. 准备 `icon-16.png`、`icon-32.png`、`icon-48.png`、`icon-128.png`，放进 `extension/assets/`；
-2. 改 `src/manifest.ts` 里的 `icons`（以及 `action.default_icon`）：
-
-```ts
-icons: {
-  16: 'assets/icon-16.png',
-  32: 'assets/icon-32.png',
-  48: 'assets/icon-48.png',
-  128: 'assets/icon-128.png',
-},
-```
-
-3. `pnpm build` → 重新加载扩展。
-
-注意：
-
-- **文件必须真实存在**，否则 Chrome 会直接报 `Could not load icon`，扩展加载失败；
-- `extension/assets/` 是构建产物目录，但里面的图标是**手放的、不会被清掉**（`pnpm clear` 只删 `extension/dist` 和 `manifest.json`）；
-- 换完如果工具栏图标没变，是 Chrome 缓存：关掉扩展再打开，或重启浏览器；
-- 页面右下角那颗 **⚙ 按钮不是扩展图标**，它是内容脚本画的 div，改它要动 `src/contentScripts/modules/panel.css` 里的 `.btn`（蓝色渐变圆钮）。
-
----
-
-## 四、目录结构
-
-```
-src/
-  manifest.ts              动态生成 extension/manifest.json
-  manifest.config.ts       content script 的 matches / 权限
-  shared/features.ts       全部开关的定义（顺序 = 设置面板里的顺序）
-  contentScripts/
-    index.ts               唯一的 content script 入口（IIFE）
-    config.ts              开关存储（chrome.storage.sync，回落 localStorage）
-    modules/
-      topbarOptimize.ts    顶栏重做 + 首页优化 + 材质根类
-      topbar.css           全部顶栏 / 搜索 / 卡片 / 预加载 CSS
-      settingsPanel.ts     设置面板（Shadow DOM）+ 恢复默认设置
-      panel.css            设置面板样式
-      imageViewer.ts       图片开合动画（评论区 + 动态页相册）
-      imageGlass.ts        图片查看器毛玻璃
-      videoFullscreen.ts   全屏 / 网页全屏动画
-      searchPanelOpt.ts    搜索面板开合与版式
-      paramStore.ts        数值参数存储工厂
-      *Config.ts           各组材质 / 预加载 / 缩放的参数定义
-  popup/                   工具栏弹窗（开关列表）
-  options/                 扩展选项页（版本信息 + 使用说明）
-scripts/                   构建脚本（生成 manifest、dev stub）
-extension/                 ← 加载这个目录；dist/ 是构建产物
-```
-
----
-
-## 五、已知限制
-
-- 顶栏改造依赖 B 站当前的 DOM 结构，B 站大改版时可能需要跟进选择器；
-- 全屏动画只在「播放页」与「直播页」生效，其他页面没有播放器容器；
-- 设置通过 `chrome.storage.sync` 同步，多设备需要登录同一浏览器账号；
-- 只在 Chromium 与 Firefox 上验证过，其他内核未测试。
-
----
-
-## 六、许可证
+## 二、许可证
 
 见 [LICENSE](./LICENSE)。

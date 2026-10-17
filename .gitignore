@@ -26,3 +26,6 @@ src/components.d.ts
 extension.zip
 extension.crx
 key.pem
+
+# 开发文档（面向用户的 README 只保留功能总览与许可证）
+DEVELOPMENT.md
