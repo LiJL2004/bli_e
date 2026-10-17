@@ -756,16 +756,6 @@ html.bili-elite-notice-compact .adblock-tips {
   display: none !important;
 }
 
-/* ===== 10.2 动态页侧栏「回到旧版」按钮 ===== */
-/* 动态页（t.bilibili.com）右侧固定栏里有一枚 40×40 的「回到旧版」按钮：
-   <div class="bili-dyn-sidebar__btn"><span>回到旧版</span></div>
-   同一容器里还有一枚「回到顶部」，它的内层是 <span class="back-top"><svg…>。
-   用 :not(:has(.back-top)) 精确排掉旧版按钮，回到顶部保留。
-   挂在始终生效层下：只有动态页存在这个节点，其他页面自然无影响。 */
-html.bili-elite-home-opt .bili-dyn-sidebar__btn:not(:has(.back-top)) {
-  display: none !important;
-}
-
 /* ===== 11. 首页预加载：提前把屏幕下方的推荐内容取回来 ===== */
 /* B 站的「加载更多」触发逻辑在 F6(e, t, n) 里：window 滚动（节流 200ms）时读加载哨兵
    `.load-more-anchor` 的 getBoundingClientRect()，只要它的 bottom 落进
@@ -951,7 +941,7 @@ html.bili-elite-home-opt .bili-elite-under-topbar {
   top: 64px !important;
 }
 
-/* ===== 16. 首页加载占位：骨架格 → 带动画的视频占位卡 ===== */
+/* ===== 16. 首页加载占位：骨架格 → 带柔和渐变的视频占位卡 ===== */
 /* B 站在推荐栅格尾部常驻一批空骨架格（`.bili-video-card__skeleton` /
    `.floor-skeleton`），占住「正在取回的那一批」的格子；`.load-more-anchor` 里那个
    楼层骨架就是加载哨兵自己的占位格。原生样式是一块**静止**的浅灰（#f1f2f3）——
@@ -960,46 +950,29 @@ html.bili-elite-home-opt .bili-elite-under-topbar {
    这里只做两件事，都不改结构、不加 JS：
    1) 把浅灰底换成一条扫过的高光（shimmer），加载中一眼可辨；
    2) 楼层骨架的封面补上和视频骨架一致的 6px 圆角，两种占位格看起来是同一类东西。
-   扫光的做法：渐变图宽度是格子的两倍（`background-size: 200% 100%`），中间一小段
-   提亮、两侧与底色同色；再让 `background-position` 在 100% ↔ 0% 之间来回移动，
-   等于把这条提亮带从左扫到右。**底色不能写成透明**：透明渐变会让整块在亮带经过时
-   变成纯白，反而看不出是占位格。
+   扫光动画已去掉（2026-10-17 第三版）：最早是 63 个 `background-position` 动画，
+   砍到 9 个之后仍然太贵 —— 实测空闲主线程 **23.7%**，把动画关掉后 **6.5%**
+   （同一次会话里连续取 6s 的 `TaskDuration`；同期 ScriptDuration 只有 11ms，
+   时间全在绘制上，不是脚本）。也试过改成合成层的 `transform` 扫光
+   （`::after` + translate3d）：本机实测反而更高（29%），收益不稳定 ——
+   于是直接退回静态占位：一层 120° 的柔和渐变，远看和原来那版静止灰块差别不大，
+   但主线程彻底安静。
+   **底色不能写成透明**：透明渐变会让整块变成纯白，反而看不出是占位格。
    背景必须写成 `background-image` + `background-size` 的组合，**不能只写 `background`
-   简写** —— B 站自己的 `background-color` 还在，简写会把它一起重置掉。
-
-   **动画只给尾部楼层骨架，卡片骨架不动**（性能优化）：卡片里的
-   `.bili-video-card__skeleton--*` 在内容加载完之后**不会从 DOM 里消失**，只是塌成
-   0×0。给它们挂 `animation: … infinite` 的结果是首页常驻 60 个 `background-position`
-   动画一直在跑（`document.getAnimations()` 实测 63 个），而 `background-position`
-   是非合成属性、每帧都要重绘 —— 实测空闲主线程占用从 0.6% 涨到 35%。尾部楼层骨架
-   只有 3 个、且正是「在加载」的那几格，动画留在它身上既不影响观感也不吃性能。 */
+   简写** —— B 站自己的 `background-color` 还在，简写会把它一起重置掉。 */
 html.bili-elite-home-opt .recommended-container_floor-aside .bili-video-card__skeleton--cover,
 html.bili-elite-home-opt .recommended-container_floor-aside .bili-video-card__skeleton--text,
 html.bili-elite-home-opt .recommended-container_floor-aside .bili-video-card__skeleton--light,
 html.bili-elite-home-opt .recommended-container_floor-aside .floor-skeleton .skeleton-item {
   background-color: #e9ecf0 !important;
   background-image: linear-gradient(
-    90deg,
-    #e9ecf0 42%,
-    #f5f7fa 50%,
-    #e9ecf0 58%
+    120deg,
+    #e9ecf0 0%,
+    #eef1f5 46%,
+    #e9ecf0 100%
   ) !important;
   background-repeat: no-repeat !important;
-  background-size: 200% 100% !important;
-}
-
-/* 只有尾部楼层骨架扫光 —— 真正「正在加载」的那几格 */
-html.bili-elite-home-opt .recommended-container_floor-aside .floor-skeleton .skeleton-item {
-  animation: bili-elite-skeleton-shimmer 1.6s linear infinite !important;
-}
-
-@keyframes bili-elite-skeleton-shimmer {
-  from {
-    background-position: 100% 0;
-  }
-  to {
-    background-position: 0% 0;
-  }
+  background-size: 100% 100% !important;
 }
 
 /* 楼层骨架的封面原生是直角，和视频骨架的 6px 圆角对不上 */
@@ -1007,36 +980,27 @@ html.bili-elite-home-opt .recommended-container_floor-aside .floor-skeleton .ske
   border-radius: 6px;
 }
 
-/* 尊重系统的「减少动态效果」：关掉扫光，退回静态占位 */
-@media (prefers-reduced-motion: reduce) {
-  html.bili-elite-home-opt .recommended-container_floor-aside .bili-video-card__skeleton--cover,
-  html.bili-elite-home-opt .recommended-container_floor-aside .bili-video-card__skeleton--text,
-  html.bili-elite-home-opt .recommended-container_floor-aside .bili-video-card__skeleton--light,
-  html.bili-elite-home-opt .recommended-container_floor-aside .floor-skeleton .skeleton-item {
-    animation: none !important;
-    background-image: none !important;
-  }
-}
-
 /* ===== 17. 原生浮动按钮（右下角那一列）=====
    B 站把「刷新 / 换一换 / 三点 / 客服 / 顶部」分散在四套容器里，各自一套样式：
      - 首页：`.palette-button-wrap`（fixed，right 60px）里有「刷新内容」
-       `.flexible-roll-btn.refresh`、「三点」`.storage-box`、「顶部」`.to-top-btn`、
-       「客服」`.customer-service-btn`；信息流栅格右上角另有一枚「换一换」`.feed-roll-btn`；
+       `.flexible-roll-btn.refresh`、「三点」+「客服」（这两个都在 `.storage-box` 里：
+       `.storable-items` 包着 `.customer-service-btn`，旁边是 `.float-button.three-dots`）、
+       「顶部」`.to-top-btn`；信息流栅格右上角另有一枚「换一换」`.feed-roll-btn`；
      - 搜索页：`.side-buttons`（absolute，贴在结果区右侧）里有「客服」（一个
        `a[href*="customer-service"]`）和「顶部」`.btn-to-top-wrap`；
      - 视频页：`.fixed-sidenav-storage`（fixed）里有「小窗」「客服」`a.customer-service`
        和「顶部」`.back-to-top-wrap`；
-     - 动态页：`.bili-dyn-sidebar` 里的「回到顶部」（见 §10.2，同一容器里的「回到旧版」始终隐藏）。
+     - 动态页：`.bili-dyn-sidebar` 里两枚同类的 `div.bili-dyn-sidebar__btn` —— 「回到旧版」
+       （始终隐藏）与「回到顶部」（内层是 `span.back-top`，跟开关走）。
    我们自己在右下角画了一套「返回顶部 / 刷新」（见 floatingButtons.ts），原生这批就多余了：
    位置打架、语义重复。这里按「始终隐藏」+「两个开关」分两层收掉。
    注：客服那几条带了 `:has(> …)` 的父级选择器 —— 搜索页 / 视频页的客服外面还套了一层
-   `div`，只藏 `a` 会在 flex 列里留下一个占位空档。 */
+   `div`，只藏 `a` 会在 flex 列里留下一个占位空档；首页直接藏整个 `.storage-box`
+   （实测里面只有「三点」和「客服」两样，2026-10-17）。 */
 
-/* 17.1 始终隐藏：三点菜单（「…」，功能入口重复且位置撞车）与客服 */
+/* 17.1 始终隐藏：首页「三点 + 客服」整块，以及动态页的「回到旧版」 */
 html.bili-elite-home-opt .palette-button-wrap .storage-box,
-html.bili-elite-home-opt .customer-service-btn,
-html.bili-elite-home-opt a[href*="customer-service"],
+html.bili-elite-home-opt .bili-dyn-sidebar__btn:not(:has(.back-top)),
 html.bili-elite-home-opt .side-buttons > div:has(> a[href*="customer-service"]),
 html.bili-elite-home-opt .fixed-sidenav-storage > div:has(> a.customer-service) {
   display: none !important;
