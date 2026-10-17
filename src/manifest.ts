@@ -57,7 +57,7 @@ export async function getManifest() {
     ],
     web_accessible_resources: [
       {
-        resources: ['dist/contentScripts/style.css'],
+        resources: ['dist/contentScripts/style.css', 'assets/panel-mascot.png'],
         matches: ['<all_urls>'],
       },
     ],

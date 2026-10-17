@@ -165,7 +165,7 @@ const SCALE_DEF = PANEL_SCALE_PARAM_DEFS[0]
  * 每改一次代码把 v 后面 +1（v001 → v002 …），正式版本号升级时才重置回 v001。
  * 规则写在 `.opencode/skills/bili-elite/SKILL.md` 的「版本、发布与图标」一节。
  */
-const DEV_VERSION = '1.0.1 v003'
+const DEV_VERSION = '1.0.1 v004'
 
 export function setupSettingsPanel(): () => void {
   if ((window as any).__biliEliteSettingsInjected__) return () => {}
@@ -331,6 +331,20 @@ export function setupSettingsPanel(): () => void {
     confirmMask.classList.toggle('is-glass', glass)
   }
 
+  /** 「奶睿设置键」：把右下角的 ⚙ 换成奶睿形象（默认关闭，见 features.ts 的 mascotButton） */
+  function applyMascotButton() {
+    const on = !!getAll().mascotButton
+    btn.classList.toggle('is-mascot', on)
+    if (!on) {
+      btn.style.removeProperty('--bili-mascot-img')
+      return
+    }
+    // 图片在 extension/assets/ 里，manifest 的 web_accessible_resources 必须登记过，
+    // 否则页面上下文加载 chrome-extension:// 资源会被拒
+    const url = typeof chrome !== 'undefined' ? chrome.runtime.getURL?.('assets/panel-mascot.png') : undefined
+    if (url) btn.style.setProperty('--bili-mascot-img', `url("${url}")`)
+  }
+
   function updateRangeFill(input: HTMLInputElement) {
     const min = Number.parseFloat(input.min)
     const max = Number.parseFloat(input.max)
@@ -420,6 +434,7 @@ export function setupSettingsPanel(): () => void {
       setRangesEnabled(g.inputs, !!cfg[g.feature])
     }
     applyPanelGlass()
+    applyMascotButton()
   }
 
   // 「设置面板缩放」：不属于任何功能开关，单独渲染与接线

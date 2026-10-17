@@ -626,3 +626,36 @@ input:checked + .track .thumb { transform: translateX(18px); }
   text-align: right;
   user-select: text;
 }
+
+/* 「奶睿设置键」：把悬浮球换成奶睿形象（界面优化 → 奶睿设置键，默认关闭）。
+   图片是 192×192 透明 PNG，用 88% 缩放让全身都在圆里；外面一圈白描边 + 黄色光晕，
+   和原版蓝色渐变球区分开。不加动画 —— 一个常驻的呼吸光晕就是每帧重绘，
+   和之前刚砍掉的那批骨架动画是同一类开销。 */
+.btn.is-mascot {
+  width: 52px;
+  height: 52px;
+  background-color: transparent;
+  background-image: var(--bili-mascot-img, none);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 88%;
+  color: transparent;
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.9),
+    0 6px 16px rgba(255, 190, 0, 0.42),
+    0 0 22px 4px rgba(255, 206, 45, 0.55);
+}
+.btn.is-mascot:hover {
+  transform: scale(1.08);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.95),
+    0 8px 22px rgba(255, 190, 0, 0.55),
+    0 0 30px 8px rgba(255, 206, 45, 0.72);
+}
+.btn.is-mascot:active {
+  transform: scale(0.92, 0.95);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.9),
+    0 4px 14px rgba(255, 190, 0, 0.45),
+    0 0 18px 2px rgba(255, 206, 45, 0.6);
+}
