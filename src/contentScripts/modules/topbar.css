@@ -756,6 +756,16 @@ html.bili-elite-notice-compact .adblock-tips {
   display: none !important;
 }
 
+/* ===== 10.2 动态页侧栏「回到旧版」按钮 ===== */
+/* 动态页（t.bilibili.com）右侧固定栏里有一枚 40×40 的「回到旧版」按钮：
+   <div class="bili-dyn-sidebar__btn"><span>回到旧版</span></div>
+   同一容器里还有一枚「回到顶部」，它的内层是 <span class="back-top"><svg…>。
+   用 :not(:has(.back-top)) 精确排掉旧版按钮，回到顶部保留。
+   挂在始终生效层下：只有动态页存在这个节点，其他页面自然无影响。 */
+html.bili-elite-home-opt .bili-dyn-sidebar__btn:not(:has(.back-top)) {
+  display: none !important;
+}
+
 /* ===== 11. 首页预加载：提前把屏幕下方的推荐内容取回来 ===== */
 /* B 站的「加载更多」触发逻辑在 F6(e, t, n) 里：window 滚动（节流 200ms）时读加载哨兵
    `.load-more-anchor` 的 getBoundingClientRect()，只要它的 bottom 落进

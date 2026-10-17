@@ -155,6 +155,8 @@ const PARAM_GROUPS: ParamGroup[] = [
  * 它不是一个功能开关，所以单独渲染、单独接线。
  */
 const SCALE_GROUP = '界面优化'
+/** 「个性设置」：奶睿主题相关（设置键 / 顶栏图）+ 设置管理，独立成一页 */
+const PERSONAL_GROUP = '个性设置'
 const SCALE_DEF = PANEL_SCALE_PARAM_DEFS[0]
 
 /**
@@ -165,7 +167,7 @@ const SCALE_DEF = PANEL_SCALE_PARAM_DEFS[0]
  * 每改一次代码把 v 后面 +1（v001 → v002 …），正式版本号升级时才重置回 v001。
  * 规则写在 `.opencode/skills/bili-elite/SKILL.md` 的「版本、发布与图标」一节。
  */
-const DEV_VERSION = '1.0.1 v006'
+const DEV_VERSION = '1.0.1 v007'
 
 export function setupSettingsPanel(): () => void {
   if ((window as any).__biliEliteSettingsInjected__) return () => {}
@@ -265,8 +267,10 @@ export function setupSettingsPanel(): () => void {
     // 「界面优化」页末尾追加「设置面板缩放」——它不是一个开关，单独占一张整行卡片
     if (groupName === SCALE_GROUP) {
       blocks.push(`\n          <div class="setting-block is-plain">${rangeRowHtml('scale', SCALE_DEF)}\n          </div>`)
+    }
+    // 「个性设置」页：奶睿主题两个开关之后接「设置管理」，最末一行是开发版本标记
+    if (groupName === PERSONAL_GROUP) {
       blocks.push(manageBlockHtml)
-      // 最末一行：开发版本标记，用来确认当前装的是哪一次构建
       blocks.push(`\n          <div class="dev-version">开发版本 ${DEV_VERSION}</div>`)
     }
     return `
