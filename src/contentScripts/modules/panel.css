@@ -634,16 +634,34 @@ input:checked + .track .thumb { transform: translateX(18px); }
 .btn.is-mascot {
   width: 52px;
   height: 52px;
-  background-color: transparent;
-  background-image: var(--bili-mascot-img, none);
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: 88%;
+  background-color: #FFD338;
+  /* 第一层是角色图，第二层是铺满整个圆盘的黄色径向渐变 —— 光晕从角色身后起，
+     圆盘里不留任何空白；再配合 box-shadow 继续向外弥漫 */
+  background-image:
+    var(--bili-mascot-img, none),
+    radial-gradient(circle at 50% 62%, #FFF6D0 0%, #FFE071 42%, #FFC400 100%);
+  background-position: center, center;
+  background-repeat: no-repeat, no-repeat;
+  background-size: 86%, 100% 100%;
   color: transparent;
   box-shadow:
-    0 0 0 2px rgba(255, 255, 255, 0.9),
-    0 6px 16px rgba(255, 190, 0, 0.42),
-    0 0 22px 4px rgba(255, 206, 45, 0.55);
+    0 0 0 2px rgba(255, 255, 255, 0.92),
+    0 4px 12px rgba(255, 180, 0, 0.5),
+    0 0 26px 8px rgba(255, 200, 30, 0.62);
+}
+.btn.is-mascot:hover {
+  transform: scale(1.08);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.96),
+    0 6px 18px rgba(255, 180, 0, 0.6),
+    0 0 34px 12px rgba(255, 200, 30, 0.78);
+}
+.btn.is-mascot:active {
+  transform: scale(0.92, 0.95);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.92),
+    0 3px 10px rgba(255, 180, 0, 0.55),
+    0 0 20px 6px rgba(255, 200, 30, 0.6);
 }
 .btn.is-mascot:hover {
   transform: scale(1.08);

@@ -37,6 +37,8 @@ export const FEATURES = [
   { key: 'noticeCompact', label: '顶部提示条收起', default: true, group: '界面优化' },
   // 把右下角那颗 ⚙ 换成奶睿形象；默认关闭，保持原版悬浮球
   { key: 'mascotButton', label: '奶睿设置键', default: false, group: '界面优化', cardBreak: true },
+  // 把顶栏左上角的 logo 换成奶睿形象；默认关闭，关着仍是原版自绘字标
+  { key: 'mascotLogo', label: '奶睿顶栏图', default: false, group: '界面优化' },
 ] as const satisfies readonly FeatureDef[]
 
 export type FeatureKey = typeof FEATURES[number]['key']

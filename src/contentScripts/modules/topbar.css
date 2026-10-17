@@ -109,6 +109,22 @@ html.bili-elite-home-opt.bili-elite-topbar-ready #bili-elite-topbar-skeleton {
   mask: url("//i0.hdslb.com/bfs/archive/a6fc20e8360913e8c796df1def661bf1d7f1b9c8.png") no-repeat center / contain;
 }
 
+/* 「奶睿顶栏图」：把左上角的自绘字标换成奶睿形象（界面优化 → 奶睿顶栏图，默认关闭）。
+   原字标是 76×34 的 mask（B 站字标），换成方形插画后按高度对齐 —— 保持 34px 高、
+   垂直居中、left 仍是 24px，宽度收到 42px，视觉上还是原来那个位置上的图标。
+   不加光晕 / 阴影，避免和顶栏的毛玻璃材质打架。 */
+html.bili-elite-mascot-logo #bili-elite-logo .bili-elite-logo__mark {
+  width: 42px;
+  height: 34px;
+  background-color: transparent;
+  -webkit-mask: none;
+  mask: none;
+  background-image: var(--bili-logo-img, none);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}
+
 /* 2. 深色文字 / 图标（SVG 走 currentColor）。
    「投稿」是粉色按钮、文字与图标本来就是白色，要排除在外，否则会被染黑 */
 html.bili-elite-home-opt .bili-header .bili-header__bar .left-entry,

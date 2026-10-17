@@ -87,6 +87,9 @@ const ROOT_PRELOAD = 'bili-elite-preload'
 /** 「播放页右栏留白收起」/「顶部提示条收起」：只切 root class，纯 CSS 生效（无需 JS 观察器） */
 const ROOT_RAIL_COMPACT = 'bili-elite-rail-compact'
 const ROOT_NOTICE_COMPACT = 'bili-elite-notice-compact'
+
+/** 「奶睿顶栏图」——把左上角自绘字标换成奶睿形象 */
+const ROOT_MASCOT_LOGO = 'bili-elite-mascot-logo'
 /**
  * 「卡片边界」/「卡片确认」：三个页面 × 两个效果 = 六个独立开关，一个开关一个 root class。
  * 表格化是因为它们除了类名不同之外行为完全一样（都只切 class、纯 CSS 生效）。
@@ -637,6 +640,20 @@ function applyLayoutCompact() {
   document.documentElement.classList.toggle(ROOT_NOTICE_COMPACT, get('noticeCompact'))
 }
 
+/** 「奶睿顶栏图」：只切 root class + 写一个 CSS 变量，纯 CSS 生效 */
+function applyMascotLogo() {
+  const root = document.documentElement
+  const on = get('mascotLogo')
+  root.classList.toggle(ROOT_MASCOT_LOGO, on)
+  if (!on) {
+    root.style.removeProperty('--bili-logo-img')
+    return
+  }
+  // 图片在 extension/assets/ 里，manifest 的 web_accessible_resources 必须登记过
+  const url = typeof chrome !== 'undefined' ? chrome.runtime.getURL?.('assets/logo-mascot.png') : undefined
+  if (url) root.style.setProperty('--bili-logo-img', `url("${url}")`)
+}
+
 /** 六个卡片开关：只切 root class，纯 CSS 生效（无需 JS 观察器） */
 function applyCardScopes() {
   for (const key of Object.keys(CARD_SCOPE_CLASSES) as Array<keyof typeof CARD_SCOPE_CLASSES>) {
@@ -689,6 +706,7 @@ export function setupTopbarOptimize(): () => void {
   applyPreload(get('preload'))
   applyCardScopes()
   applyLayoutCompact()
+  applyMascotLogo()
   applyTopbarParams()
   applySearchParams()
   applyPreloadParams()
@@ -706,6 +724,8 @@ export function setupTopbarOptimize(): () => void {
       applyPreload(get('preload'))
     } else if (key === 'railCompact' || key === 'noticeCompact') {
       applyLayoutCompact()
+    } else if (key === 'mascotLogo') {
+      applyMascotLogo()
     } else if (key in CARD_SCOPE_CLASSES) {
       applyCardScopes()
     }
@@ -739,6 +759,7 @@ export function setupTopbarOptimize(): () => void {
       ROOT_PRELOAD,
       ROOT_RAIL_COMPACT,
       ROOT_NOTICE_COMPACT,
+      ROOT_MASCOT_LOGO,
       ...Object.values(CARD_SCOPE_CLASSES),
     )
     document.documentElement.style.removeProperty('--bili-topbar-blur')
@@ -749,6 +770,7 @@ export function setupTopbarOptimize(): () => void {
     document.documentElement.style.removeProperty('--bili-searchpanel-blur')
     document.documentElement.style.removeProperty('--bili-searchpanel-tint')
     document.documentElement.style.removeProperty('--bili-preload-dist')
+    document.documentElement.style.removeProperty('--bili-logo-img')
   }
   disposeTopbarOpt = dispose
   return () => {
