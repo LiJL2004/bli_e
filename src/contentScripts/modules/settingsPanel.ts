@@ -2,6 +2,7 @@ import type { FeatureKey } from '~/shared/features'
 import type { NumberParamDef } from './paramStore'
 import { DEFAULT_CONFIG, groupFeatures } from '~/shared/features'
 import { getAll, onConfigChange, persist } from '../config'
+import { LAYER_SETTINGS, bindLayerToWebFullscreen } from './videoLayer'
 import {
   GLASS_PARAM_DEFS,
   getGlassParams,
@@ -167,7 +168,7 @@ const SCALE_DEF = PANEL_SCALE_PARAM_DEFS[0]
  * 每改一次代码把 v 后面 +1（v001 → v002 …），正式版本号升级时才重置回 v001。
  * 规则写在 `.opencode/skills/bili-elite/SKILL.md` 的「版本、发布与图标」一节。
  */
-const DEV_VERSION = '1.0.1 v010'
+const DEV_VERSION = '1.0.2 v001'
 
 export function setupSettingsPanel(): () => void {
   if ((window as any).__biliEliteSettingsInjected__) return () => {}
@@ -181,12 +182,13 @@ export function setupSettingsPanel(): () => void {
     'left:auto!important',
     'bottom:180px!important',
     'right:24px!important',
-    'z-index:2147483647!important',
     'width:44px',
     'height:44px',
     'pointer-events:auto',
   ].join(';')
   ;(document.documentElement || document.body).appendChild(host)
+  // 层级交给 videoLayer：平时压过页面一切，进网页全屏降到播放器下面被视频盖住
+  const offLayer = bindLayerToWebFullscreen(host, LAYER_SETTINGS)
 
   const shadow = host.attachShadow({ mode: 'open' })
 
@@ -359,7 +361,7 @@ export function setupSettingsPanel(): () => void {
     input.parentElement?.style.setProperty('--p', `${pct}%`)
   }
 
-  const cleanups: Array<() => void> = []
+  const cleanups: Array<() => void> = [offLayer]
   const wired: WiredGroup[] = []
 
   // 统一接线：每个参数组负责自己的滑块渲染、同步与回写

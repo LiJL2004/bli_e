@@ -1,5 +1,6 @@
 import { get, onConfigChange } from '../config'
 import floatCss from './floatingButtons.css?inline'
+import { LAYER_FLOATS, bindLayerToWebFullscreen } from './videoLayer'
 
 /**
  * 右下角两枚浮动键：返回顶部 / 刷新（挂在设置键 ⚙ 上方，白底黑图标）。
@@ -55,10 +56,11 @@ export function setupFloatingButtons(): () => void {
     'left:auto!important',
     'right:24px!important',
     'bottom:234px!important',
-    'z-index:2147483646!important',
     'pointer-events:none',
   ].join(';')
   ;(document.documentElement || document.body).appendChild(host)
+  // 和设置键同一套层级规则：网页全屏时一起降到视频下面
+  const offLayer = bindLayerToWebFullscreen(host, LAYER_FLOATS)
 
   const shadow = host.attachShadow({ mode: 'open' })
   shadow.innerHTML = `
@@ -123,6 +125,7 @@ export function setupFloatingButtons(): () => void {
     refreshBtn?.removeEventListener('click', onRefresh)
     window.removeEventListener('scroll', onScroll)
     offConfig()
+    offLayer()
     host.remove()
   }
 }

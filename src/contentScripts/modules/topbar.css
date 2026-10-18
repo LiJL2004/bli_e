@@ -357,13 +357,32 @@ html.bili-elite-home-opt body:has(.bili-header) #bili-elite-logo {
   top: 64px;
   left: -96px;
   padding-top: 8px;
-  display: none;
   z-index: 1004;
+  /* 以前是 display:none ↔ block —— display 不可过渡，所以面板是「啪」一下出现。
+     现在用 visibility + opacity + 位移：opacity / transform 能过渡，visibility 只在
+     首尾各切一次（隐藏时延迟到淡出结束，否则会把动画掐断）。
+     隐藏态必须 pointer-events:none —— 面板虽然看不见，但绝对定位仍然占着那块区域，
+     不收事件的话会把下面频道栏的点击吃掉。 */
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(-6px);
+  pointer-events: none;
+  transition:
+    opacity 0.16s ease,
+    transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
+    visibility 0s linear 0.16s;
 }
 html.bili-elite-home-opt .bili-header .left-entry .left-entry-main > .home-page-entry:hover ~ #bili-elite-home-panel,
 html.bili-elite-home-opt .bili-header .left-entry .left-entry-main > .home-page-panel-entry:hover ~ #bili-elite-home-panel,
 #bili-elite-home-panel:hover {
-  display: block;
+  visibility: visible;
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+  transition:
+    opacity 0.16s ease,
+    transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
+    visibility 0s;
 }
 #bili-elite-home-panel .bili-elite-panel-card {
   width: 767px;

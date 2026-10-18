@@ -1,7 +1,7 @@
 {
   "name": "bili-elite",
   "displayName": "奶睿pro",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "packageManager": "pnpm@9.7.1",
   "description": "B 站页面布局与视觉优化扩展：顶栏重做、全屏 / 图片开合动效、iOS 毛玻璃材质、搜索面板与首页信息流优化。",

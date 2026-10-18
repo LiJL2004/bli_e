@@ -210,6 +210,20 @@ let headerSeen = false
 let keepAliveTimer: number | null = null
 let preloadObserver: IntersectionObserver | null = null
 let preloadAnchor: HTMLElement | null = null
+/**
+ * 信息流被整块换过（刷新 / 加载下一批）。
+ *
+ * IntersectionObserver **只在相交状态变化时**回调。而「返回顶部 → 刷新」这个组合里：
+ * 返回顶部后哨兵在视口下方（不相交），刷新把信息流换成一页新的之后哨兵跑到视口上方
+ * （仍然不相交）—— 状态没变，回调就不会触发，保活定时器一直不开，底部骨架挂在原地。
+ * 与此同时 `syncPreloadAnchor` 看到哨兵节点被复用（B 站刷新时常常不换这个节点）
+ * 就直接 return，观察器也就一直停在那份旧状态上。手动下滑会触发真实 scroll、
+ * 几何连续变化产生一次相交跨越，于是「下滑后恢复」。
+ *
+ * 这里用脏标记：信息流一有增删，下一次 sync() 就强制重建观察器 ——
+ * 重建必然带一次初始回调，按当前几何重新判定，不再依赖「是否跨过阈值」。
+ */
+let preloadDirty = false
 
 function leftMain(): HTMLElement | null {
   return document.querySelector<HTMLElement>('.bili-header__bar .left-entry .left-entry-main')
@@ -422,7 +436,9 @@ function sync() {
   }
   syncChrome()
   scanPageBars()
-  syncPreloadAnchor()
+  // 信息流刚被换过就强制重建观察器（见 preloadDirty 的注释），否则沿用旧的
+  syncPreloadAnchor(preloadDirty)
+  preloadDirty = false
   if (!document.querySelector('.bili-header')) return
   ensureDynamicEntry()
   ensureHomePanel()
@@ -468,6 +484,23 @@ function onHover(e: Event) {
   if (target?.closest?.(`.left-entry-main, #${PANEL_ID}`)) fillPanel()
 }
 
+/**
+ * 这批 DOM 变化是否动了首页信息流。
+ * 「刷新」会整块重建卡片、加载下一批会往栅格里塞新卡，两种情况哨兵节点都可能被复用，
+ * 所以只认「信息流区域 / 哨兵 / 卡片」相关的变化（见 preloadDirty）。
+ */
+function touchesFeed(mutations: MutationRecord[]): boolean {
+  for (const m of mutations) {
+    const target = m.target as Element | null
+    if (target?.closest?.('.recommended-container_floor-aside, .load-more-anchor')) return true
+    for (const n of Array.from(m.addedNodes)) {
+      if (n instanceof Element && n.matches?.('.load-more-anchor, .bili-video-card, .feed-card, .floor-single-card'))
+        return true
+    }
+  }
+  return false
+}
+
 function startObservers() {
   sync()
   window.addEventListener('resize', schedule)
@@ -482,6 +515,8 @@ function startObservers() {
     const headerEl = document.querySelector('.bili-header')
     const headerJustAppeared = !!headerEl && !headerSeen
     headerSeen = !!headerEl
+    // 信息流换过就打个脏标记，下一次 sync() 会重建预加载观察器
+    if (touchesFeed(mutations)) preloadDirty = true
     if (
       !document.getElementById(LOGO_ID)
       || !document.getElementById(SKELETON_ID)
@@ -607,11 +642,12 @@ function nudgePreload() {
  * 改成 IntersectionObserver：只有哨兵进入「视口底部 + 200px」（与 B 站判据同值）
  * 时才开那个补发 scroll 的定时器，离开就关 —— 用户不在底部时开销为零。
  */
-function syncPreloadAnchor() {
+function syncPreloadAnchor(force = false) {
   const anchor = document.querySelector<HTMLElement>(
     '.recommended-container_floor-aside .container > .load-more-anchor',
   )
-  if (anchor === preloadAnchor) return
+  // force：节点没变也要重建观察器 —— 重建时的初始回调会按当前几何重新判定一次
+  if (!force && anchor === preloadAnchor) return
   preloadObserver?.disconnect()
   preloadAnchor = anchor
   if (!anchor) {
