@@ -1,0 +1,360 @@
+/* ===== 功能轮盘（页面上的浮层，Shadow DOM 内） =====
+   结构照参考图来，不是「一整块圆盘 + 八根分隔线」：
+
+     .stage
+       .scrim   全屏虚化（把轮盘以外的页面糊掉）—— **只有这一层受「轮盘背景」材质控制**
+       .wheel   轮盘本体（只负责尺寸与动画，本身没有底色）
+         svg.ring   八片「花瓣」，彼此留缝，填充是「内实外虚」的径向渐变
+         .hub       中心圆（卡片，名字 + 提示都在里面）
+         .chips     图标胶囊 + 名称
+
+   三条硬规则：
+   1. **八片花瓣之间是真的断开**（WHEEL_GAP），缝隙里透出的是虚化后的页面。
+      参考图里那八块本来就是分开的，画分隔线是「切开的整块」，观感差一档。
+   2. **轮盘本体的材质是写死的**（花瓣渐变 + 中心圆白卡），不跟「高级材质」联动 ——
+      那一项只负责背景。理由很实际：中心圆里要读两行字，遮罩一被拉高就糊成白片、
+      一拉低字就看不清；材质不该有「调坏」的可能。
+   3. **轮盘里不许出现 backdrop-filter**。整块 .wheel 进出场时在缩放 + 淡入淡出，
+      只要它内部有一层 backdrop-filter，祖先的 opacity / transform 每帧变化都会让
+      那层重新采样背景（祖先 opacity<1 = 新的「背景根」）。中心圆本来就是 0.86 白的
+      卡片，去掉模糊肉眼几乎看不出差别，顶上补一道竖向高光就够了。
+
+   动画：进 = 放大 + 淡入（缓出、轻微过冲），出 = 缩小 + 淡出（缓入，比进快一半）。
+   两段都是**一次呼吸**，所有元素在同一个时间点收尾。
+
+   ⚠️ 收回不要「慢慢缩一点点然后原地等」：上一版 .wheel 200ms 只缩到 0.94、
+   opacity 一直是 1，八格图标 215ms 就没了，轮盘却原样停到 333ms 才瞬间消失 ——
+   中间 120ms 画面完全不动，看着就是「卡」。现在缩放 + 淡出同时进行，
+   最长的一条（scrim 200ms）就是整段动画的长度。 */
+
+.stage {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  visibility: hidden;
+  /* 收回时最长的一条是 .scrim 的 200ms，隐藏要等它走完 */
+  transition: visibility 0s linear 210ms;
+}
+.stage.show {
+  visibility: visible;
+  /* 展开时接管整屏点击：按住呼出键的同时点一下鼠标 = 直接选中并前往，
+     同时保证这一下不会穿透到页面上的卡片 / 链接 */
+  pointer-events: auto;
+  transition: visibility 0s;
+}
+
+/* 全屏毛玻璃：轮盘以外的页面一起虚化。**只有它吃「轮盘背景」的两个参数**。
+   必须是 .wheel 的**兄弟**而不是祖先 —— 带 backdrop-filter 的元素会成为后代的
+   「背景根」，套在轮盘外面的话花瓣和中心圆自己的模糊就只能采到这一层内部。 */
+.scrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  /* 全屏滤镜的 opacity 动画是最贵的一帧活儿，单独提层让它走合成器 */
+  will-change: opacity;
+  /* 收回：和轮盘同一条时间线，一起收干净 */
+  transition: opacity 200ms cubic-bezier(0.4, 0, 0.7, 1);
+}
+.stage.show .scrim {
+  opacity: 1;
+  /* 呼出：比轮盘快一步铺上去，轮盘才有「浮起来」的感觉 */
+  transition: opacity 160ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.stage.is-glass .scrim {
+  background: rgba(20, 22, 30, var(--bili-wheel-dim, 0.16));
+  -webkit-backdrop-filter: blur(var(--bili-wheel-blur, 19px)) saturate(120%);
+  backdrop-filter: blur(var(--bili-wheel-blur, 19px)) saturate(120%);
+}
+
+/* 预热（见 quickWheel.ts 的 warmUp）：给遮罩 1% 不透明度，逼浏览器把全屏模糊
+   真正渲染一遍。1% × 16% 暗色 = 0.16%，肉眼看不见，但第一次呼出就不会再为
+   shader 编译掉帧。 */
+.stage.is-warm { visibility: visible; }
+.stage.is-warm .scrim { opacity: 0.01; transition: none; }
+/* 轮盘本体也要跟着画一遍：花瓣是 SVG 径向渐变、名字带白晕描边，
+   这些同样是第一次上屏才光栅化。1% 不透明度同样看不见。 */
+.stage.is-warm .wheel,
+.stage.is-warm .hub,
+.stage.is-warm .chip { opacity: 0.01; transition: none; }
+
+/* 轮盘本体：没有底色，只负责尺寸与进出场。
+
+   440 是 viewBox 的边长：图标、中心圆都按「占直径的百分比」定位，换尺寸不用重算。 */
+.wheel {
+  position: relative;
+  width: min(440px, 74vmin);
+  aspect-ratio: 1;
+  opacity: 0;
+  transform: scale(0.9);
+  will-change: transform, opacity;
+  /* 收回：缓入（越走越快）+ 淡出，200ms 内连缩带散一起结束 */
+  transition:
+    opacity 170ms cubic-bezier(0.4, 0, 0.7, 1),
+    transform 200ms cubic-bezier(0.4, 0, 0.7, 1);
+}
+.stage.show .wheel {
+  opacity: 1;
+  transform: scale(1);
+  /* 呼出：缓出 + 轻微过冲，落定时有一点「停住」的重量感 */
+  transition:
+    opacity 150ms cubic-bezier(0.2, 0.8, 0.3, 1),
+    transform 260ms cubic-bezier(0.22, 1.12, 0.36, 1);
+}
+
+.ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+}
+
+/* 花瓣：白色由内向外渐隐（渐变定义在 SVG 的 <defs> 里，圆心 = 轮盘中心）。
+   选中换成品牌蓝。这两个填充是**写死的**，不跟材质滑块联动。 */
+.wedge {
+  fill: url(#petal-fill);
+  transition: fill 180ms var(--bili-ease, ease);
+}
+.wedge.is-on { fill: url(#petal-fill-on); }
+.stage.is-night .wedge { fill: url(#petal-fill-night); }
+.stage.is-night .wedge.is-on { fill: url(#petal-fill-on-night); }
+
+/* 中心圆：卡片。直径 = 2×92 / 440 = 41.8%。
+   底色固定在这个白度 —— 保证「深色页面上是浅灰卡、浅色页面上是白卡」，
+   两种情况下深色文字都有足够对比度，所以名字永远读得清。
+   竖向高光（上亮下略暗）替代掉原来的 backdrop-filter：一眼是「一片玻璃」，
+   但不吃任何滤镜开销。 */
+.hub {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 41.82%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%) scale(0.94);
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 0 10%;
+  box-sizing: border-box;
+  text-align: center;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.85) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  /* 阴影要「往下落」，不能「往外扩」：34px 的模糊 + 0.18 的浓度会在中心圆周围
+     糊出一圈灰环，看着像个灰甜甜圈。改成小偏移、低浓度，只留一点点浮起来的感觉。 */
+  box-shadow:
+    0 0 0 1px rgba(20, 22, 30, 0.04),
+    0 6px 18px rgba(20, 22, 30, 0.07),
+    0 2px 5px rgba(20, 22, 30, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+
+  font-family: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif;
+  /* 收回：跟着轮盘一起缩回去，不留延迟 */
+  transition: transform 200ms cubic-bezier(0.4, 0, 0.7, 1);
+}
+.stage.show .hub {
+  transform: translate(-50%, -50%) scale(1);
+  /* 比轮盘晚 30ms、再长一点：轮盘先铺开，中心圆随后「落定」，层次感就出来了 */
+  transition: transform 280ms cubic-bezier(0.22, 1.1, 0.36, 1) 30ms;
+}
+
+.hub-name {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 23px;
+  letter-spacing: 0.2px;
+  color: #1c1c1e;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 180ms var(--bili-ease, ease);
+}
+.hub-name.is-idle {
+  color: #5b5b63;
+  font-weight: 500;
+  font-size: 15px;
+}
+.hub-desc {
+  font-size: 11.5px;
+  line-height: 15px;
+  color: #74747c;
+  max-width: 100%;
+  /* 允许折两行：长提示在 184px 的圆里一行放不下，截断反而看不懂 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 图标层：铺满轮盘、只负责给 .chip 当百分比定位的参照（本身不吃点击） */
+.chips {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* 一格 = 圆形图标 + 下面一行名字。
+   高度写死 64px（46 + 3 + 15）是为了让「有名字」和「空槽」两种格子的图标中心
+   都落在同一个半径上 —— 否则空槽会比其他格子矮一截，看着像没对齐。 */
+.chip {
+  position: absolute;
+  left: calc(50% + var(--x, 0%));
+  top: calc(50% + var(--y, 0%));
+  width: 104px;
+  height: 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.88);
+  /* 收回：反向错开（最后弹出来的那格先走），错开量只给 4ms —— 八格排着队走
+     会在一段 200ms 的动画里切出三段节奏，反而更「拖」 */
+  transition:
+    opacity 120ms cubic-bezier(0.4, 0, 0.7, 1) calc((7 - var(--i, 0)) * 4ms),
+    transform 140ms cubic-bezier(0.4, 0, 0.7, 1) calc((7 - var(--i, 0)) * 4ms);
+}
+/* 呼出：顺时针依次弹出，每格错开 8ms（八格共 56ms），收尾仍在 260ms 内 */
+.stage.show .chip {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+  transition:
+    opacity 200ms cubic-bezier(0.22, 1.12, 0.36, 1) calc(var(--i, 0) * 8ms),
+    transform 240ms cubic-bezier(0.22, 1.12, 0.36, 1) calc(var(--i, 0) * 8ms);
+}
+
+.chip-icon {
+  flex: 0 0 auto;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(20, 22, 30, 0.06);
+  color: #0A6CFF;
+  box-shadow:
+    0 4px 14px rgba(20, 22, 30, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition:
+    background 180ms var(--bili-ease, ease),
+    color 180ms var(--bili-ease, ease),
+    border-color 180ms var(--bili-ease, ease),
+    box-shadow 180ms var(--bili-ease, ease),
+    transform 180ms var(--bili-ease-spring, ease-out);
+}
+.chip-icon svg { display: block; width: 24px; height: 24px; }
+.chip-label {
+  max-width: 100%;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 15px;
+  letter-spacing: 0.1px;
+  color: #22232a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* 名字落在花瓣渐隐的那一段上，底色深浅不定 —— 用一圈白晕把它「托」出来，
+     深底浅底都能读（和字幕描边一个道理），比加一层实心底干净。 */
+  text-shadow:
+    0 0 5px rgba(255, 255, 255, 0.95),
+    0 0 2px rgba(255, 255, 255, 0.9),
+    0 1px 2px rgba(255, 255, 255, 0.8);
+  transition: color 180ms var(--bili-ease, ease);
+}
+
+/* 选中：整颗图标变成品牌蓝实心、微微上浮，名字一起转成蓝色。
+   外面再加一圈淡蓝光晕 —— 蓝色图标落在蓝色花瓣上时，靠这圈光把边界撑开。 */
+.chip.is-on .chip-icon {
+  background: linear-gradient(135deg, #4C9BFF 0%, #0A6CFF 100%);
+  border-color: transparent;
+  color: #FFFFFF;
+  transform: translateY(-2px) scale(1.06);
+  box-shadow:
+    0 10px 24px rgba(10, 108, 255, 0.4),
+    0 0 0 4px rgba(10, 108, 255, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+/* 选中时名字**不能跟着变蓝**：名字落在花瓣渐隐的那一段上，那里蓝色已经很淡，
+   蓝字压在淡蓝上等于没有对比度。用深靛蓝 —— 既和未选中的墨色区分得开，
+   又在淡蓝、白、深色三种底上都读得清。 */
+.chip.is-on .chip-label { color: #10336e; }
+
+/* 空槽：虚线占位圈，不写名字 —— 方向还在、只是没装东西 */
+.chip.is-empty .chip-icon {
+  background: rgba(255, 255, 255, 0.32);
+  border: 1px dashed rgba(20, 22, 30, 0.26);
+  box-shadow: none;
+}
+
+/* ===== 夜间模式（「个性设置 → 夜间模式」打开时，由 quickWheel.ts 切 .is-night） =====
+   配色与 night.css / panel.css §21 对齐：底 #16171a、卡片 #202226、强调 #6fb0ff */
+.stage.is-night .scrim { background: rgba(0, 0, 0, calc(var(--bili-wheel-dim, 0.16) * 1.6)); }
+.stage.is-night .hub {
+  background: linear-gradient(180deg, rgba(40, 42, 47, 0.95) 0%, rgba(28, 30, 34, 0.92) 100%);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.04),
+    0 14px 34px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.stage.is-night .hub-name { color: #e6e8ec; }
+.stage.is-night .hub-name.is-idle,
+.stage.is-night .hub-desc { color: rgba(255, 255, 255, 0.5); }
+.stage.is-night .chip-icon {
+  background: #202226;
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #6fb0ff;
+  box-shadow:
+    0 4px 14px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.stage.is-night .chip.is-on .chip-icon {
+  background: linear-gradient(135deg, #8cc4ff 0%, #6fb0ff 100%);
+  border-color: transparent;
+  color: #0b1220;
+  box-shadow:
+    0 10px 24px rgba(111, 176, 255, 0.34),
+    0 0 0 4px rgba(111, 176, 255, 0.14);
+}
+.stage.is-night .chip.is-empty .chip-icon {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+.stage.is-night .chip-label {
+  color: rgba(255, 255, 255, 0.82);
+  text-shadow:
+    0 0 5px rgba(0, 0, 0, 0.6),
+    0 1px 2px rgba(0, 0, 0, 0.5);
+}
+/* 夜间选中的名字同理：浅蓝压在深蓝上不如近白 */
+.stage.is-night .chip.is-on .chip-label { color: #dbeaff; }
+
+/* 尊重系统的「减少动态效果」：只留淡入淡出，去掉缩放、位移与逐个弹出。
+   这段必须写在这里 —— 页面级的 designTokens.css 进不了 Shadow DOM */
+@media (prefers-reduced-motion: reduce) {
+  .stage { transition: none; }
+  /* 轮盘只淡入淡出，不缩放；中心圆只保留居中位移 */
+  .wheel,
+  .stage.show .wheel { transform: none; }
+  .wheel { transition: opacity 120ms linear; }
+  .stage.show .wheel { transition: opacity 120ms linear; }
+  .hub,
+  .stage.show .hub { transform: translate(-50%, -50%); transition: none; }
+  /* 图标不缩放、不逐个弹出 */
+  .chip,
+  .stage:not(.show) .chip { transform: translate(-50%, -50%); }
+  .chip,
+  .stage.show .chip { transition: opacity 120ms linear; }
+  .chip-icon { transition: background 120ms linear, color 120ms linear; }
+  .chip.is-on .chip-icon { transform: none; }
+}

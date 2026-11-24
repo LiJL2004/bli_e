@@ -1,8 +1,7 @@
 import { get, onConfigChange } from '../config'
+import { IMAGE_DUR_CLOSE, IMAGE_EASE } from './imageViewer'
 
 const STYLE_ID = 'bili-elite-anim-style'
-const IMAGE_DUR_CLOSE = 290
-const IMAGE_EASE = 'cubic-bezier(0.25, 0.46, 0.45, 0.94)'
 
 function applyStyle() {
   const existing = document.getElementById(STYLE_ID)

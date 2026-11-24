@@ -1,0 +1,294 @@
+/* ===== 搜索页优化 · 结果栅格 =====
+   挂在 html.bili-elite-search-only 上（设置面板「界面优化 → 搜索页优化」，默认开启）。
+   只作用于搜索结果页（search.bilibili.com）—— 下面的选择器全部带
+   .search-all-list / .search-page-video / .search-layout 这类该页独有的类名，
+   所以这个 root class 挂在全站也不会波及其它页面。
+
+   B 站原样（1920 实测）：
+   1. 每个区块的 .i_wrapper 左右各留 96px，并且 max-width: 2200px ——
+      2560 的屏幕上两侧各空 180px（这就是「左右白边太大」）；
+   2. 栅格是 bootstrap 的 12 列（.col_3 / .col_xl_1_7 …），列数按断点写死，
+      1920 下固定 7 列、卡片只有 275px，比首页（5 列 332px）小一大截；
+   3. 卡片之间靠格子的 padding: 0 8px 撑开（横向 16px），纵向靠 .mb_x40 的
+      40px 外边距 —— 上下比左右松一倍多，整屏是一排排「小卡 + 大间隔」。
+
+   这里：
+   1. 留白固定成 `--bili-edge`（10px），**和首页 / 播放页是同一条边**（1.2.0 v005）；
+      筛选栏（.search-tabs.i_wrapper）与结果区共用同一个 .i_wrapper 规则，
+      所以左右边缘仍然对齐；
+   2. 列数交给 auto-fill，列宽由 --bili-search-card 决定
+      （「搜索页优化」的「卡片大小」滑块，默认 320px，与首页一致）；
+   3. 横向 / 纵向间距统一成 20px —— 与首页栅格的 gap 一致。
+      B 站原本横向 16、纵向 40，收窄的是纵向那条。
+
+   为什么只改「结果列表」那一行：
+   同一个页面里还有一条 .video-list.row 装在 UP 主卡片里（.user-video-info，
+   7 列缩略图）。那条不能套 auto-fill —— 320px 起步会把 UP 主卡里的缩略图
+   撑成 5 张大图。所以栅格规则限定在区块的直接子级
+   （:is(.search-all-list, .search-page-video) > .video-list.row），
+   UP 主卡片里那条的父级是 .user-video-info，天然不被命中。 */
+
+html.bili-elite-search-only {
+  --bili-search-gutter: var(--bili-edge, 10px);
+  --bili-search-gap: 20px;
+}
+
+/* 1. 左右留白：区块容器统一换成窄栏。只覆盖左右，上下的 30px（区块间距）保留 */
+html.bili-elite-search-only .search-layout .i_wrapper {
+  max-width: none !important;
+  padding-left: var(--bili-search-gutter) !important;
+  padding-right: var(--bili-search-gutter) !important;
+}
+
+/* 2. 整页最外层那个匿名 div 封顶 2560px（与首页同一个坑）：
+   >2560 的屏幕上光这一层就吃掉一大截。用 :has() 只命中「装着搜索页布局」的那一层 */
+html.bili-elite-search-only body > div:has(> .search-layout) {
+  max-width: none !important;
+}
+
+/* 3. 栅格：固定 7 列 → auto-fill。margin: 0 是抵掉 .row 的 -8px 负边距 ——
+   负边距原本用来吃掉格子的 padding，现在 padding 归零、间距交给 gap */
+html.bili-elite-search-only :is(.search-all-list, .search-page-video) > .video-list.row {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(var(--bili-search-card, 350px), 1fr)) !important;
+  column-gap: var(--bili-search-gap) !important;
+  row-gap: var(--bili-search-gap) !important;
+  margin: 0 !important;
+}
+
+/* 4. 格子：去掉 bootstrap 的百分比上限 / 8px 内边距 / 40px 下边距，让卡片撑满列宽。
+   max-width 必须重置：.col_xl_1_7 之类把上限写成了 14.2857%，栅格里会直接压住列宽 */
+html.bili-elite-search-only :is(.search-all-list, .search-page-video) > .video-list.row > * {
+  max-width: none !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  margin-bottom: 0 !important;
+}
+
+/* ===== 搜索页优化 · 筛选按钮（1.2.5 v024；v028 扩到全部筛选行）=====
+   综合页：「综合排序 / 最多播放 …」排序行 + 展开「更多筛选」后的日期 / 时长芯片 ——
+   都在 .search-conditions 里，同一枚 button.vui_button--tab；
+   直播页：「全部 / 主播 / 直播间」在 .live-condition 里（同一枚 vui_button--tab），
+   「综合排序 / 最新开播」是 .live-type-btn（B 站 scoped 规则 (0,5~6,0)，选中是实心蓝底白字）；
+   「更多筛选 / 查看更多」本体是 .i_button_more（B 站全局规则给 height/padding/font-size 写了 !important）。
+   B 站原样（vui_button--tab）：32px 白底胶囊、灰字 #61666D、8px 圆角，选中 #DFF6FD + #00AEEC。
+   这里统一换成设置面板左侧分类（panel.css .nav-item）同一套观感：
+     · 形状：8px 圆角 → 999px 胶囊；高度 / 字号统一成 32 / 14（live-type-btn 28→32、13→14）；
+     · 颜色：灰字 → #202124，悬停走 8% 状态层（::before），选中 #D3E3FD 底 + #1A73E8 字 +
+       font-weight 600 —— CJK 字形进宽与字重无关，选中后按钮不会变宽；
+     · 动效：background-color / color 0.15s cubic-bezier(.2,0,0,1)，另加涟漪（topbarOptimize.ts）。
+   选择器带 body / 全路径是为了压 B 站的 scoped 样式；.i_button_more 那三条要 !important 才压得过。 */
+html.bili-elite-search-only body :is(.search-conditions, .live-condition) .vui_button--tab,
+html.bili-elite-search-only body .search-page-live .live-room .room-header .live-type-btn,
+html.bili-elite-search-only body .i_button_more {
+  height: 32px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background-color: transparent;
+  color: #202124;
+  font-size: 14px;
+  line-height: 20px;
+  position: relative;
+  overflow: hidden;
+  /* 独立层叠上下文：按钮里只有裸文本 / 图标（没法像面板那样给子元素挂 z-index:1），
+     给涟漪用 z-index:-1，压在按钮底色之上、文字之下 —— 文字全程清晰 */
+  isolation: isolate;
+  --blie-ripple-z: -1;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color 0.15s cubic-bezier(0.2, 0, 0, 1),
+    color 0.15s cubic-bezier(0.2, 0, 0, 1);
+}
+/* .i_button_more 的这三条被 B 站写了 !important（全局 (0,1,0)），同权重 !important 才压得过 */
+html.bili-elite-search-only body .i_button_more {
+  height: 32px !important;
+  padding: 0 16px !important;
+  font-size: 14px !important;
+}
+
+/* 悬停 / 按下状态层（与 .nav-item::before 一致：currentColor 8% / 12%） */
+html.bili-elite-search-only body :is(.search-conditions, .live-condition) .vui_button--tab::before,
+html.bili-elite-search-only body .search-page-live .live-room .room-header .live-type-btn::before,
+html.bili-elite-search-only body .i_button_more::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: currentColor;
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+  z-index: 0;
+}
+html.bili-elite-search-only body :is(.search-conditions, .live-condition) .vui_button--tab:hover::before,
+html.bili-elite-search-only body .search-page-live .live-room .room-header .live-type-btn:hover::before,
+html.bili-elite-search-only body .i_button_more:hover::before {
+  opacity: 0.08;
+}
+html.bili-elite-search-only body :is(.search-conditions, .live-condition) .vui_button--tab:active::before,
+html.bili-elite-search-only body .search-page-live .live-room .room-header .live-type-btn:active::before,
+html.bili-elite-search-only body .i_button_more:active::before {
+  opacity: 0.12;
+}
+
+/* 选中态：浅蓝底 + 品牌蓝字，不加悬停灰（与 .nav-item.is-active 一致）；
+   live-type-btn 原来是实心蓝底白字，一并换成同款 */
+html.bili-elite-search-only body :is(.search-conditions, .live-condition) .vui_button--tab.vui_button--active,
+html.bili-elite-search-only body .search-page-live .live-room .room-header .live-type-btn.vui_button--active {
+  background-color: #D3E3FD; /* g-blue-container */
+  color: #1A73E8; /* g-blue */
+  font-weight: 600;
+}
+html.bili-elite-search-only body :is(.search-conditions, .live-condition) .vui_button--tab.vui_button--active::before,
+html.bili-elite-search-only body .search-page-live .live-room .room-header .live-type-btn.vui_button--active::before {
+  display: none;
+}
+
+/* 涟漪：topbarOptimize.ts 在搜索页装 installRipple，节点样式在 ripple.css（全仓库唯一一份）。
+   这里的按钮里只有裸文本节点，没法像面板那样给子元素挂 z-index:1，所以给按钮加
+   `isolation: isolate`，再用 `--blie-ripple-z: -1` 让涟漪压在按钮底色之上、文字之下。 */
+
+/* ===== 搜索页优化 · 分类标签栏（综合 / 视频 / 番剧 …）（1.2.5 v025）=====
+   照用户给的 Google 风格 demo（deepseek_html_…html 的「标签页」那段）搬：
+     .tabs           flex + 2px 间距 + 1px 底线 #DADCE0（--outline）
+     .tab            48px 高、0 22px 内边距、14px / 500、灰字 #5F6368（--text-2），
+                     hover 变 #202124（--text，color .24s），选中 #4285F4（--g-blue）
+     .tab-indicator  底部 3px 高、上圆角 3px 的蓝条，transform / width .38s cubic-bezier(.2,0,0,1)，
+                     位置由 searchTabs.ts 按选中项的 offsetLeft / offsetWidth 写进 style
+     涟漪            demo 里每个 .tab 都带 .ripple —— 这里把 li 加进搜索页的涟漪选择器
+   B 站原样（实测，样式在跨域的 laputa-search/assets/index-*.css）：ul.vui_tabs--nav 40px 高、
+   align-items:center；链接 16px、padding 10px 24px（搜索页再覆盖成 20px）；**悬停 / 选中的蓝色加在
+   .vui_tabs--nav-text 上且带 !important**（品牌蓝 #00AEEC）。所以：
+     · 内边距那条的特异性是 (0,6,0)，要用 .search-layout .search-header .search-tabs 全路径才压得住；
+     · 文字色必须写在 .vui_tabs--nav-text 上，悬停 / 选中态要 !important；
+     · vui 组件库自带滑动条 .vui_tabs--nav-slider（**是 ul 的兄弟节点**，挂在 .vui_tabs--navbar 下，
+       由 B 站 JS 写内联 left/width，宽 = 文字宽、4px 高、圆角 2px、transition: all .35s）—— 它就是
+       截图里和新指示条叠成「粗蓝条」的旧控件，这里直接 display:none，位置全部交给新指示条；
+     · 计数徽标 .vui_tabs--nav-num 也换成 demo 令牌（surface-2 / text-2，选中项用 .chip.on 的淡蓝）；
+     · B 站自己在标签栏下面画的 hr.search-line（1px #F1F2F3）和 4px 占位 ::after 一起藏掉，
+       标签栏下方只剩 demo .tabs 那条 1px 底线；
+     · 波纹按用户要求用 demo 的蓝色（--blie-ripple-color），切换标签时结果区 fadeUp（.blie-tab-fade）。
+   DOM：.search-tabs .vui_tabs--navbar > (ul.vui_tabs--nav > li.vui_tabs--nav-item(.vui_tabs--nav-item-active)
+        > span.vui_tabs--nav-link > .vui_tabs--nav-text + .vui_tabs--nav-num) + div.vui_tabs--nav-slider
+   首项 padding-left 与其它项一致（22px）：用户要求离左边界再远一些，不再保留 B 站的 0。 */
+html.bili-elite-search-only body .search-tabs .vui_tabs--nav {
+  position: relative;
+  align-items: stretch;
+  gap: 2px;
+  height: 48px;
+  border-bottom: 1px solid #DADCE0;
+  /* demo：.tabs { overflow-x: auto; scrollbar-width: none } —— 标签太多时横向可滚，不显示滚动条 */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+html.bili-elite-search-only body .search-tabs .vui_tabs--nav::-webkit-scrollbar {
+  display: none;
+}
+
+/* 旧控件：B 站原生滑动条，整条换成新指示条后它只会叠成一根粗条 —— 藏掉 */
+html.bili-elite-search-only body .search-tabs .vui_tabs--nav-slider {
+  display: none !important;
+}
+/* 旧控件：B 站自己在标签栏下面画的分隔线 hr.search-line（1px #F1F2F3，离标签栏 7px），
+   demo 里只有 .tabs 自己那条 1px 底线 —— 删掉；连同它上面那个 4px 的透明占位（::after）一起去，
+   否则标签栏和下面内容之间多出 4px。 */
+html.bili-elite-search-only body .search-header .search-line,
+html.bili-elite-search-only body .search-tabs .vui_tabs--navbar::after {
+  display: none;
+}
+
+/* 标签项 = 涟漪宿主（相对定位 + 裁切 + 独立层叠上下文，与排序按钮同一套道理） */
+html.bili-elite-search-only body .search-tabs .vui_tabs--nav-item {
+  /* demo .tab：position relative / overflow hidden / flex none / height 48 / border 0 / background none */
+  display: flex;
+  flex: none;
+  align-items: stretch;
+  position: relative;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  isolation: isolate;
+  --blie-ripple-z: -1;
+  /* 波纹：demo 的 .ripple-wave 是 currentColor，用户要求按原版的蓝色来 */
+  --blie-ripple-color: #4285F4;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+html.bili-elite-search-only body .search-layout .search-header .search-tabs .vui_tabs--nav-item .vui_tabs--nav-link {
+  display: flex;
+  align-items: center;
+  padding: 0 22px;
+  font-size: 14px;
+  line-height: 20px;
+}
+/* 首项：B 站写了 padding-left: 0 !important（.vui_tabs--nav-pl0），这里同样用 !important 压回去 */
+html.bili-elite-search-only body .search-layout .search-header .search-tabs .vui_tabs--nav.vui_tabs--nav-pl0 .vui_tabs--nav-item:first-child .vui_tabs--nav-link {
+  padding-left: 22px !important;
+}
+/* 计数徽标：demo 的 .chip 令牌（surface-2 底 / text-2 字），选中项用 .chip.on 的淡蓝底 + 蓝字 */
+html.bili-elite-search-only body .search-tabs .vui_tabs--nav-num {
+  padding: 0 6px;
+  height: 18px;
+  line-height: 18px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: #5F6368;
+  background: #F1F3F4;
+  transition:
+    background-color 0.24s cubic-bezier(0.2, 0, 0, 1),
+    color 0.24s cubic-bezier(0.2, 0, 0, 1);
+}
+html.bili-elite-search-only body .search-tabs .vui_tabs--nav-item-active .vui_tabs--nav-num {
+  color: #4285F4;
+  background: rgba(66, 133, 244, 0.14);
+}
+/* 文字色在 .vui_tabs--nav-text 上（B 站的悬停 / 选中色就加在这里，带 !important） */
+html.bili-elite-search-only body .search-tabs .vui_tabs--nav-text {
+  color: #5F6368;
+  font-weight: 500;
+  transition: color 0.24s cubic-bezier(0.2, 0, 0, 1);
+}
+html.bili-elite-search-only body .search-tabs .vui_tabs--nav-item:hover .vui_tabs--nav-text {
+  color: #202124 !important;
+}
+html.bili-elite-search-only body .search-tabs .vui_tabs--nav-item-active .vui_tabs--nav-text,
+html.bili-elite-search-only body .search-tabs .vui_tabs--nav-item-active:hover .vui_tabs--nav-text {
+  color: #4285F4 !important;
+}
+/* B 站若给选中项 / 悬停加底色或描边（如有）一律去掉，只留文字色 + 指示条 */
+html.bili-elite-search-only body .search-tabs .vui_tabs--nav-item::before,
+html.bili-elite-search-only body .search-tabs .vui_tabs--nav-link::before,
+html.bili-elite-search-only body .search-tabs .vui_tabs--nav-link::after {
+  content: none;
+}
+
+/* 滑动指示条：width / translateX 由 searchTabs.ts 写；首帧带 .is-init 不走过渡 */
+html.bili-elite-search-only body .search-tabs .vui_tabs--nav > .blie-tab-indicator {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 0;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: #4285F4;
+  pointer-events: none;
+  transition:
+    transform 0.38s cubic-bezier(0.2, 0, 0, 1),
+    width 0.38s cubic-bezier(0.2, 0, 0, 1);
+}
+html.bili-elite-search-only body .search-tabs .vui_tabs--nav > .blie-tab-indicator.is-init {
+  transition: none;
+}
+
+/* demo .tab-panel.active：切换标签时内容淡入 + 上移 8px（.38s var(--ease)）。
+   searchTabs.ts 在选中项变化时给结果区 .search-content 挂一下 .blie-tab-fade，播完自己摘掉。 */
+html.bili-elite-search-only body .search-content.blie-tab-fade {
+  animation: search-tab-fade-up 0.38s cubic-bezier(0.2, 0, 0, 1);
+}
+@keyframes search-tab-fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html.bili-elite-search-only body .search-content.blie-tab-fade { animation: none; }
+}

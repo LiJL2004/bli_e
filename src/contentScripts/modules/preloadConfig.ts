@@ -32,7 +32,7 @@ export const PRELOAD_PARAM_DEFS: PreloadParamDef[] = [
     step: 10,
     default: 150,
     fmt: v => `${v}%`,
-    hint: '百分比 = 提前预加载下方多少屏内容，100% ≈ 1 屏；以当前滚动位置为基准，最多 3 屏（3 页）。',
+    hint: '百分比 = 提前预加载下方多少屏内容，100% ≈ 1 屏；以当前滚动位置为基准，最多 3 屏（3 页）',
   },
 ]
 

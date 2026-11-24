@@ -1,0 +1,95 @@
+/* ===== 图片查看器工具栏（PhotoSwipe 内）=====
+   参考百度贴吧的看图器：底部一颗深色胶囊，左边缩放、中间旋转、右边还原。
+   交互走 Google Material：圆形按钮 + 状态层 + 点击涟漪（ripple.ts），不做下载。
+
+   位置固定在 `.pswp` 里（B 站把 pswp 直接挂在 body 下，见 imageTools.ts），
+   跟着 `.pswp--ui-visible` 一起显隐 —— 鼠标静止几秒后 B 站的顶部栏会淡出，
+   这颗胶囊跟着淡出才不会孤零零挂在屏幕上；动一下鼠标就回来。 */
+
+.blie-img-tools {
+  position: absolute;
+  left: 50%;
+  bottom: 28px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 999px;
+  /* 图片底色深浅不定：光靠半透明黑在深色照片上会和背景糊成一片（实测几乎看不见），
+     所以再加一圈 1px 白色内描边当轮廓 */
+  background: rgba(28, 28, 30, 0.78);
+  backdrop-filter: blur(12px);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 4px 18px rgba(0, 0, 0, 0.34);
+  transform: translateX(-50%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.pswp--ui-visible .blie-img-tools {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.blie-img-tool {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  overflow: hidden;
+  /* 涟漪是 absolute 子节点，容器必须是 relative + hidden，否则会溢出成方块 */
+  transition: background-color 120ms cubic-bezier(0.2, 0, 0, 1);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.blie-img-tool:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.blie-img-tool:active {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.blie-img-tool svg {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+  /* 白图标压在浅色照片上会糊掉，投影给它一圈暗边（不依赖胶囊底色） */
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
+  pointer-events: none;
+}
+
+/* 涟漪节点样式在 ripple.css（全仓库唯一一份），由 imageTools.ts 的 installRipple() 注入；
+   按钮本身 color: #fff，currentColor 就是白色涟漪。 */
+
+/* 窄屏：胶囊整体缩一档，别压到左右翻页箭头 */
+@media (width <= 640px) {
+  .blie-img-tools {
+    bottom: 16px;
+    padding: 3px;
+  }
+
+  .blie-img-tool {
+    width: 34px;
+    height: 34px;
+  }
+
+  .blie-img-tool svg {
+    width: 18px;
+    height: 18px;
+  }
+}

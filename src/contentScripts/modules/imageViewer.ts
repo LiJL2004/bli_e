@@ -1,10 +1,11 @@
 import { get } from '../config'
 import { EventBag } from '../eventBag'
+import { prefersReducedMotion } from './designTokens'
 
 const DRAG_THRESHOLD = 10
 const POLL_TIMEOUT = 800
 const IMG_WAIT_TIMEOUT = 500
-const IMAGE_EASE = 'cubic-bezier(0.25, 0.46, 0.45, 0.94)'
+export const IMAGE_EASE = 'cubic-bezier(0.25, 0.46, 0.45, 0.94)'
 export const IMAGE_DUR_OPEN = 330
 export const IMAGE_DUR_CLOSE = 290
 
@@ -122,6 +123,11 @@ export function setupImageViewer(): () => void {
       const swRect = inner.getBoundingClientRect()
       const flip = computeFlip(swRect, elRect, rect)
       if (!flip) return
+
+      // 系统开了「减少动态效果」：不做跨屏 FLIP —— 那是整张图从缩略图飞到大图，
+      // 位移 + 缩放都很大，正是这类用户最难受的一类动画。开合都直接显示，
+      // 连下面的「关闭时反向飞回」观察器也一并跳过。
+      if (prefersReducedMotion()) return
 
       lockFor(IMAGE_DUR_OPEN)
       inner.style.transformOrigin = 'top left'

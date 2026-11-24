@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>奶睿pro · 推荐图 1400×560</title>
+<style>
+  /* ===== 画布：1400×560，扁平风。配色取扩展自己的品牌色 ===== */
+  :root {
+    --pink: #FB7299;
+    --blue: #00AEEC;
+    --ink: #18191C;
+    --ink-2: #61666D;
+    --ink-3: #9499A0;
+    --line: #E7E9ED;
+    --card: #F6F7F8;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 1400px;
+    height: 560px;
+    overflow: hidden;
+  }
+
+  body {
+    position: relative;
+    background: #FFFFFF;
+    font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* 背景：两块纯色斜切 + 一点点圆点网格，扁平不靠渐变 */
+  .bg-wedge {
+    position: absolute;
+    right: 0;
+    top: 0;
+    width: 760px;
+    height: 560px;
+    background: #F4F9FF;
+    clip-path: polygon(16% 0, 100% 0, 100% 100%, 0 100%);
+  }
+
+  .bg-dots {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 620px;
+    height: 220px;
+    background-image: radial-gradient(#DFE6EF 1.6px, transparent 1.6px);
+    background-size: 22px 22px;
+    opacity: 0.55;
+    mask-image: linear-gradient(105deg, #000 0%, transparent 78%);
+    -webkit-mask-image: linear-gradient(105deg, #000 0%, transparent 78%);
+  }
+
+  /* ===== 左侧文案区 ===== */
+  .left {
+    position: absolute;
+    left: 64px;
+    top: 62px;
+    width: 560px;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .brand img {
+    width: 86px;
+    height: 86px;
+    display: block;
+  }
+
+  .brand-txt { padding-top: 4px; }
+
+  .title {
+    font-size: 62px;
+    line-height: 1;
+    font-weight: 800;
+    letter-spacing: -1.5px;
+    color: var(--ink);
+  }
+
+  .title em {
+    font-style: normal;
+    color: var(--pink);
+  }
+
+  .tagline {
+    margin-top: 10px;
+    font-size: 17px;
+    line-height: 24px;
+    color: var(--ink-2);
+    letter-spacing: 0.2px;
+  }
+
+  .badge-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 26px;
+  }
+
+  .badge {
+    height: 28px;
+    padding: 0 12px;
+    border-radius: 14px;
+    display: inline-flex;
+    align-items: center;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+  }
+
+  .badge.is-blue { background: rgba(0, 174, 236, 0.12); color: #0197CC; }
+  .badge.is-pink { background: rgba(251, 114, 153, 0.14); color: #E4577E; }
+  .badge.is-line { border: 1px solid var(--line); color: var(--ink-3); font-weight: 500; }
+
+  /* 功能清单 */
+  .feats {
+    margin-top: 26px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+  }
+
+  .feat {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .feat i {
+    flex: none;
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-style: normal;
+  }
+
+  .feat i svg { display: block; }
+
+  .feat.is-blue i { background: rgba(0, 174, 236, 0.12); color: #0197CC; }
+  .feat.is-pink i { background: rgba(251, 114, 153, 0.14); color: #E4577E; }
+
+  .feat p {
+    font-size: 16px;
+    line-height: 26px;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+
+  /* 标签做成定宽，右边那句说明才会全部对齐在同一条竖线上 ——
+     靠全角空格对齐会因为标签字数不同而参差不齐 */
+  .feat p b {
+    display: inline-block;
+    width: 114px;
+    font-weight: 700;
+  }
+
+  .feat p span { color: var(--ink-2); font-weight: 400; }
+
+  .foot {
+    position: absolute;
+    left: 64px;
+    bottom: 44px;
+    font-size: 13px;
+    color: var(--ink-3);
+    letter-spacing: 0.3px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .foot s {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: #CFD6DF;
+    text-decoration: none;
+  }
+
+  /* ===== 右侧：浏览器窗口（展示「视频页半顶栏 + 播放页满宽」） ===== */
+  .window {
+    position: absolute;
+    left: 648px;
+    top: 58px;
+    width: 700px;
+    height: 444px;
+    background: #FFFFFF;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 18px 40px rgba(24, 25, 28, 0.08);
+  }
+
+  /* 浏览器自己的标题栏 */
+  .chrome {
+    height: 34px;
+    background: #F7F8FA;
+    border-bottom: 1px solid #EDEFF2;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 12px;
+  }
+
+  .dots { display: flex; gap: 6px; }
+  .dots s {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    text-decoration: none;
+  }
+  .dots s:nth-child(1) { background: #FF5F57; }
+  .dots s:nth-child(2) { background: #FEBC2E; }
+  .dots s:nth-child(3) { background: #28C840; }
+
+  .url {
+    flex: 1;
+    height: 20px;
+    border-radius: 10px;
+    background: #FFFFFF;
+    border: 1px solid #E7E9ED;
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    font-size: 10px;
+    color: var(--ink-3);
+    letter-spacing: 0.2px;
+  }
+
+  /* 页面主体：左右两栏，播放器直接顶到窗口上沿 */
+  .page {
+    display: flex;
+    height: 410px;
+  }
+
+  .col-left {
+    width: 420px;
+    padding: 12px 0 0 12px;
+  }
+
+  .player {
+    position: relative;
+    width: 408px;
+    height: 230px;
+    border-radius: 8px;
+    background: #14161A;
+    overflow: hidden;
+  }
+
+  /* 播放器里的一点画面感：纯色块 + 一道斜光 */
+  .player::before {
+    content: "";
+    position: absolute;
+    left: -40px;
+    top: 0;
+    width: 220px;
+    height: 230px;
+    background: #1B1E24;
+    clip-path: polygon(0 0, 100% 0, 62% 100%, 0 100%);
+  }
+
+  .play {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    translate: -50% -50%;
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.92);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .play::after {
+    content: "";
+    width: 0;
+    height: 0;
+    margin-left: 3px;
+    border-left: 12px solid #14161A;
+    border-top: 7px solid transparent;
+    border-bottom: 7px solid transparent;
+  }
+
+  .bar {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 10px;
+    height: 3px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.24);
+  }
+
+  .bar s {
+    display: block;
+    width: 38%;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--blue);
+    text-decoration: none;
+  }
+
+  .vt {
+    margin-top: 12px;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 700;
+    color: var(--ink);
+    letter-spacing: 0.2px;
+  }
+
+  .vmeta {
+    margin-top: 5px;
+    font-size: 10px;
+    color: var(--ink-3);
+    letter-spacing: 0.2px;
+  }
+
+  .up {
+    margin-top: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .up-face {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #DCE6F2;
+  }
+
+  .up-name {
+    font-size: 11px;
+    color: var(--ink-2);
+    font-weight: 600;
+  }
+
+  .up-btn {
+    margin-left: auto;
+    margin-right: 12px;
+    height: 20px;
+    padding: 0 10px;
+    border-radius: 4px;
+    background: var(--pink);
+    color: #fff;
+    font-size: 10px;
+    display: flex;
+    align-items: center;
+  }
+
+  .desc {
+    margin-top: 10px;
+    margin-right: 12px;
+    height: 56px;
+    border-radius: 8px;
+    background: var(--card);
+    padding: 9px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .desc s {
+    height: 6px;
+    border-radius: 3px;
+    background: #E2E6EC;
+    text-decoration: none;
+  }
+  .desc s:nth-child(1) { width: 74%; }
+  .desc s:nth-child(2) { width: 52%; }
+  .desc s:nth-child(3) { width: 63%; }
+
+  /* 右栏：顶栏只画在这一栏上方 —— 这就是「半顶栏」 */
+  .col-right {
+    flex: 1;
+    border-left: 12px solid transparent;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .half-topbar {
+    height: 40px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-right: 12px;
+    border-bottom: 1px solid #F0F2F5;
+  }
+
+  .logo {
+    width: 16px;
+    height: 16px;
+    border-radius: 5px;
+    background: var(--pink);
+  }
+
+  .nav-txt {
+    font-size: 10px;
+    color: var(--ink-2);
+    font-weight: 600;
+  }
+
+  .search {
+    flex: 1;
+    height: 22px;
+    border-radius: 11px;
+    background: #F3F5F8;
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    font-size: 9px;
+    color: #A9B0BA;
+  }
+
+  .icons { display: flex; gap: 7px; }
+  .icons s {
+    width: 13px;
+    height: 13px;
+    border-radius: 4px;
+    background: #E3E8EF;
+    text-decoration: none;
+  }
+
+  /* 推荐卡 */
+  .rail {
+    padding: 10px 12px 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .rc {
+    display: flex;
+    gap: 8px;
+  }
+
+  .rc-thumb {
+    flex: none;
+    width: 62px;
+    height: 36px;
+    border-radius: 5px;
+    background: #E9EEF5;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .rc-thumb::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: 100%;
+    background: #DDE6F0;
+    clip-path: polygon(62% 0, 100% 0, 100% 100%, 34% 100%);
+  }
+
+  .rc-txt { flex: 1; padding-top: 1px; }
+  .rc-txt s {
+    display: block;
+    height: 6px;
+    border-radius: 3px;
+    background: #E7EBF1;
+    text-decoration: none;
+  }
+  .rc-txt s + s { margin-top: 6px; background: #EEF1F5; }
+
+  /* 两个标注：都放在窗口上方的同一行，各自对着它描述的那一块（左对播放器、右对顶栏），
+     不压任何界面元素 —— 压上去在缩略图里就像贴了张创可贴 */
+  .callout {
+    position: absolute;
+    height: 24px;
+    padding: 0 10px;
+    border-radius: 12px;
+    background: var(--pink);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    letter-spacing: 0.2px;
+    white-space: nowrap;
+  }
+
+  .callout.is-blue { background: var(--blue); }
+
+  /* 左：对齐播放器左边缘（窗口 648 + 12 内边距） */
+  .callout.c2 { left: 660px; top: 14px; }
+  /* 右：对齐窗口右边缘 */
+  .callout.c1 { right: 52px; top: 14px; }
+
+  /* 右下角那颗 ⚙：整个扩展的入口 */
+  .fab {
+    position: absolute;
+    right: 26px;
+    bottom: 26px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: #FFFFFF;
+    border: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 6px 16px rgba(24, 25, 28, 0.1);
+    color: var(--ink-2);
+  }
+</style>
+</head>
+<body>
+  <div class="bg-wedge"></div>
+  <div class="bg-dots"></div>
+
+  <!-- ===== 左：品牌与卖点 ===== -->
+  <div class="left">
+    <div class="brand">
+      <img src="../extension/assets/logo-mascot.png" alt="">
+      <div class="brand-txt">
+        <div class="title">奶睿<em>pro</em></div>
+        <div class="tagline">B 站页面布局与视觉优化扩展</div>
+      </div>
+    </div>
+
+    <div class="badge-row">
+      <span class="badge is-blue">v1.1.6</span>
+      <span class="badge is-pink">顶栏重做</span>
+      <span class="badge is-line">Chrome / Edge · Manifest V3</span>
+    </div>
+
+    <div class="feats">
+      <div class="feat is-blue">
+        <i><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="1.6" y="2.6" width="10.8" height="2.2" rx="1.1"/><rect x="1.6" y="6.4" width="10.8" height="2.2" rx="1.1"/><rect x="1.6" y="10.2" width="6.4" height="2.2" rx="1.1"/></svg></i>
+        <p><b>顶栏重做</b><span>打开页面第一帧就完整，不再等 B 站加载</span></p>
+      </div>
+      <div class="feat is-pink">
+        <i><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2.2 11.8V2.2h9.6"/><path d="M2.2 6.4h6.2v5.4"/></svg></i>
+        <p><b>视频页半顶栏</b><span>播放器顶到窗口最上面，画面大一圈</span></p>
+      </div>
+      <div class="feat is-blue">
+        <i><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1.8 3.4h10.4M1.8 7h10.4M1.8 10.6h5.6"/><circle cx="11.4" cy="10.6" r="1.4"/></svg></i>
+        <p><b>播放页满宽</b><span>悬停预取，点进播放页快 450ms</span></p>
+      </div>
+      <div class="feat is-pink">
+        <i><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 1.8l1.7 3.4 3.7.5-2.7 2.6.7 3.7L7 10.3l-3.4 1.7.7-3.7L1.6 5.7l3.7-.5z"/></svg></i>
+        <p><b>毛玻璃材质</b><span>顶栏 / 搜索 / 浮层逐块可调，支持深色</span></p>
+      </div>
+      <div class="feat is-blue">
+        <i><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="1.6" y="2.4" width="10.8" height="9.2" rx="2"/><path d="M4.4 6.2h5.2M4.4 8.6h3"/></svg></i>
+        <p><b>卡片整体化</b><span>整张卡片都能点，标题不再单独变蓝</span></p>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span>40+ 项开关</span><s></s><span>全部可在面板里关掉</span><s></s><span>开源 · MIT</span>
+  </div>
+
+  <!-- ===== 右：真实界面的扁平化示意 ===== -->
+  <div class="window">
+    <div class="chrome">
+      <div class="dots"><s></s><s></s><s></s></div>
+      <div class="url">www.bilibili.com/video/BV1GJ411x7h7</div>
+    </div>
+
+    <div class="page">
+      <div class="col-left">
+        <div class="player">
+          <div class="play"></div>
+          <div class="bar"><s></s></div>
+        </div>
+        <div class="vt">【4K】这可能是 B 站最好用的页面优化扩展</div>
+        <div class="vmeta">128.6万 · 3.2万 · 2026-10-29 20:15:08 · #哔哩哔哩 #浏览器扩展</div>
+        <div class="up">
+          <div class="up-face"></div>
+          <div class="up-name">奶睿</div>
+          <div class="up-btn">+ 关注</div>
+        </div>
+        <div class="desc"><s></s><s></s><s></s></div>
+      </div>
+
+      <div class="col-right">
+        <div class="half-topbar">
+          <div class="logo"></div>
+          <div class="nav-txt">首页</div>
+          <div class="search">搜索</div>
+          <div class="icons"><s></s><s></s><s></s><s></s></div>
+        </div>
+        <div class="rail">
+          <div class="rc"><div class="rc-thumb"></div><div class="rc-txt"><s style="width:88%"></s><s style="width:56%"></s></div></div>
+          <div class="rc"><div class="rc-thumb"></div><div class="rc-txt"><s style="width:76%"></s><s style="width:62%"></s></div></div>
+          <div class="rc"><div class="rc-thumb"></div><div class="rc-txt"><s style="width:92%"></s><s style="width:48%"></s></div></div>
+          <div class="rc"><div class="rc-thumb"></div><div class="rc-txt"><s style="width:68%"></s><s style="width:58%"></s></div></div>
+          <div class="rc"><div class="rc-thumb"></div><div class="rc-txt"><s style="width:84%"></s><s style="width:52%"></s></div></div>
+          <div class="rc"><div class="rc-thumb"></div><div class="rc-txt"><s style="width:72%"></s><s style="width:64%"></s></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout c1 is-pink">顶栏只画在右栏上方</div>
+  <div class="callout c2 is-blue">播放器顶到最上面</div>
+
+  <div class="fab">
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5">
+      <circle cx="9" cy="9" r="2.4"/>
+      <path d="M9 1.8v1.6M9 14.6v1.6M1.8 9h1.6M14.6 9h1.6M3.9 3.9l1.1 1.1M13 13l1.1 1.1M14.1 3.9L13 5M5 13l-1.1 1.1" stroke-linecap="round"/>
+    </svg>
+  </div>
+</body>
+</html>

@@ -1,0 +1,107 @@
+/* 设置键 ⚙ 的样式 · Google Material 悬浮按钮 */
+.btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  position: relative;
+  background: #1A73E8;
+  box-shadow:
+    0 1px 2px rgba(60, 64, 67, 0.30),
+    0 2px 6px 2px rgba(60, 64, 67, 0.15);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: #fff;
+  transition:
+    transform 0.22s cubic-bezier(0.2, 0, 0, 1),
+    box-shadow 0.22s ease,
+    translate 0.22s ease,
+    opacity 0.22s ease;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  overflow: hidden; /* 裁切涟漪 */
+}
+/* 状态层（M3 state layer）：涟漪由 ripple.ts 按点击坐标生成，这里只管悬停 / 按下的底色 */
+.btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: #FFFFFF;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+.btn:hover::before { opacity: 0.08; }
+.btn:active::before { opacity: 0.16; }
+
+.btn:hover {
+  transform: scale(1.06);
+  box-shadow:
+    0 1px 3px rgba(60, 64, 67, 0.30),
+    0 4px 8px 3px rgba(60, 64, 67, 0.15);
+}
+.btn:active {
+  transform: scale(0.90);
+  box-shadow:
+    0 1px 3px rgba(60, 64, 67, 0.30),
+    0 4px 8px 3px rgba(60, 64, 67, 0.15);
+}
+
+/* 命中区比视觉圆盘大一圈 */
+.btn::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+}
+
+/* 「奶睿设置键」 */
+.btn.is-mascot {
+  width: 44px;
+  height: 44px;
+  background-color: #FFD338;
+  background-image:
+    var(--bili-mascot-img, none),
+    radial-gradient(circle at 50% 62%, #FFF6D0 0%, #FFE071 42%, #FFC400 100%);
+  background-position: center, center;
+  background-repeat: no-repeat, no-repeat;
+  background-size: 88%, 100% 100%;
+  color: transparent;
+  /* color 是 transparent（靠背景图显示），currentColor 做涟漪会看不见，单独给白色 */
+  --blie-ripple-color: #FFFFFF;
+  box-shadow:
+    0 1px 2px rgba(60, 64, 67, 0.30),
+    0 2px 6px 2px rgba(60, 64, 67, 0.15),
+    0 0 22px 6px rgba(255, 200, 30, 0.55);
+}
+.btn.is-mascot:hover {
+  transform: scale(1.06);
+  box-shadow:
+    0 1px 3px rgba(60, 64, 67, 0.30),
+    0 4px 8px 3px rgba(60, 64, 67, 0.15),
+    0 0 30px 10px rgba(255, 200, 30, 0.70);
+}
+.btn.is-mascot:active {
+  transform: scale(0.92, 0.95);
+  box-shadow:
+    0 1px 3px rgba(60, 64, 67, 0.30),
+    0 4px 8px 3px rgba(60, 64, 67, 0.15),
+    0 0 16px 4px rgba(255, 200, 30, 0.55);
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn { transition: none; }
+}
+
+/* 涟漪节点的样式不在这里：全仓库唯一一份在 ripple.css，由 ripple.ts 的 installRipple()
+   注入到面板的 shadow root（装监听和注样式是同一个调用，不会漏）。 */
+
+
+/* 面板主体在 panel.css 注入之前先藏住 */
+.panel,
+.confirm-mask,
+.wheel-editor {
+  display: none;
+}

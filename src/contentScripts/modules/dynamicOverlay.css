@@ -1,0 +1,506 @@
+/* 「动态悬浮打开beta」（实验室）—— 悬浮窗外壳。
+   全部住在 Shadow DOM 里（见 dynamicOverlay.ts），页面 CSS 进不来。
+
+   观感对标 bili_cat（BewlyCat）的「动态详情弹窗」：**没有标题栏**，窗口本身就是
+   一整页详情；「新标签页」和关闭键不占窗内空间，而是浮在窗口**右下角外面**一行；
+   圆角 24、1px 描边、四层大投影 + 内侧高光，遮罩是纯黑 40%（不加模糊）。 */
+
+:host {
+  all: initial;
+}
+
+/* 数值全部照抄 bili_cat 的 token（variables.scss），改的时候一起对：
+   圆角 --bew-modal-radius 24 / 描边 --bew-border-color rgb(131 131 145 / 18%) /
+   投影 --bew-shadow-4 + --bew-shadow-edge-glow-2 /
+   控件底色 --bew-elevated-solid / 正文 --bew-text-1。 */
+.dyn-root {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  pointer-events: none;
+  font-family: -apple-system, "SF Pro Text", "Helvetica Neue", "PingFang SC", sans-serif;
+  -webkit-tap-highlight-color: transparent;
+
+  --dyn-radius: 24px;
+  --dyn-border: rgb(131 131 145 / 18%);
+  --dyn-surface: hsl(240 31% 95% / 68%);
+  --dyn-canvas: #ffffff;
+  --dyn-text-1: hsl(217 19% 10%);
+  --dyn-text-2: hsl(215 19% 24% / 80%);
+  --dyn-control: hsl(0 0% 100%);
+  --dyn-control-hover: hsl(0 0% 85%);
+  --dyn-accent: #0a6cff;
+  --dyn-shadow-2: 0 10px 15px -3px rgb(0 0 0 / 10%), 0 4px 6px -4px rgb(0 0 0 / 6%);
+  --dyn-shadow-4:
+    0 34px 50px -20px rgb(0 0 0 / 14%),
+    0 32px 45px -12px rgb(0 0 0 / 10%),
+    0 30px 40px -8px rgb(0 0 0 / 12%);
+  --dyn-edge-glow:
+    inset 1px 1px 1px -0.5px rgb(255 255 255 / 34%),
+    inset -1px -1px 1px -0.5px rgb(255 255 255 / 14%),
+    inset 0 0 14px rgb(255 255 255 / 62%);
+}
+
+.dyn-root.is-open {
+  pointer-events: auto;
+}
+
+/* 遮罩：纯黑 40%，和 bili_cat 的 `bg="black opacity-40"` 一致。
+   原来这里是「半透明 + 10px 模糊」，模糊会把底下的动态流糊成一片灰，反而更吵。
+   淡入比窗口稍快一点（180ms），窗口「落下来」的时候底已经压住了。 */
+.dyn-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgb(0 0 0 / 40%);
+  opacity: 0;
+  transition: opacity 180ms var(--bili-ease, ease);
+}
+
+.dyn-root.is-open .dyn-scrim {
+  opacity: 1;
+}
+
+/* 舞台 = 窗口的尺寸 + 右上角那一行浮在外面的按钮。
+   窗口要 `overflow: hidden` 裁圆角，按钮必须露在外面，所以按钮不能放在窗口里面。 */
+.dyn-stage {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  /* 尺寸照 bili_cat：宽 min(1088, 100vw-64)，高 min(100dvh-64, 88dvh)，四边留 32px 呼吸。
+     宽度分三档（见下面 data-dyn-layout）：单栏 1088、纯文字分栏 1240、图片分栏按图算 ——
+     大屏上还按 1088 卡死，四周全是空白，中间一条窄缝，观感很差。 */
+  width: min(1088px, calc(100vw - 64px));
+  height: min(calc(100dvh - 64px), max(280px, min(88dvh, 49.5vw)));
+  /* 入场：从 96.5% 放大 + 淡入（220ms，起步快的 ease-out），退场缩回 97% ——
+     一整页内容从中心「弹」出来会晃眼睛，所以幅度很小，只做「浮起来」的层次感。
+     `visibility` 必须比 transform 晚收，否则退场动画会被当场掐断。 */
+  transform: translate(-50%, -50%) scale(0.965);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 180ms var(--bili-ease, ease),
+    transform 220ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    width 240ms var(--bili-ease, ease),
+    visibility 0s linear 220ms;
+}
+
+/* 纯文字分栏：正文 720 + 评论 645 + 两侧留白，1440 刚好把两边都放满。
+   评论列从 430 加到 645（1.5 倍），窗口也跟着加宽，否则左栏正文会被挤窄。 */
+.dyn-root[data-dyn-layout='text'] .dyn-stage {
+  width: min(1440px, calc(100vw - 64px));
+}
+
+/* 图片分栏：宽度由 JS 按「首图宽高比 × 舞台高度 + 右栏宽」算出来（见 syncMediaWidth），
+   竖图不会在两侧留一大片空白；横图 / 多图算出来会超过上限，就按 90vw / 1800 截。
+   兜底值用 1088（不是 1800）：打开那一刻还没量到图，先按基础宽度出现，量到以后再
+   平滑过渡到目标宽 —— 否则会先铺满 90vw、等内容出来再「啪」地缩窄，很跳。 */
+.dyn-root[data-dyn-layout='media'] .dyn-stage {
+  width: min(90vw, var(--dyn-media-w, 1088px));
+}
+
+/* 视频模式：悬浮窗里是播放页（16:9 播放器 + 右侧标题 / UP 主 / 评论）。
+   宽度估算那套（--dyn-media-w）完全不参与 —— 视频页跨源，父页面读不到文档，排版由
+   iframe 里的 videoBeta 自己做。
+
+   **宽度由 dynamicOverlay.ts 的 videoWidthFor() 算好写进 `--dyn-video-w`**，不是纯 CSS：
+   宽度足够时是「左播放器 + 右信息栏」两栏，宽度不够时退回单栏（播放器在上、信息在下）。
+   两种排法需要的窗宽完全不同，CSS 没法知道 iframe 里最终会不会分栏，所以交给 JS 判。
+   兜底值 1088 只在变量还没写进来时用（打开那一刻会同步写好，不会真的看到兜底）。
+
+   两栏的目标宽度 = 按窗口高度反推的 16:9 播放器 + 信息栏（440~620）+ 留白与间距；
+   视口不够宽时再被 `100vw − 64` 截住。单栏兜底仍是 v016 的公式（窗口高 − 140 的信息区）。
+
+   宽度**不做过渡**（单独写一遍 transition，去掉 width）：打开时窗口宽度是一次到位的，
+   iframe 里的 measure 才量得到最终值，不会先按过渡中的中间宽度排一版再重排。 */
+.dyn-root[data-dyn-mode='video'] .dyn-stage {
+  width: min(calc(100vw - 64px), var(--dyn-video-w, 1088px));
+  height: min(calc(100dvh - 64px), 88dvh);
+  transition:
+    opacity 180ms var(--bili-ease, ease),
+    transform 220ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    visibility 0s linear 220ms;
+}
+
+.dyn-root[data-dyn-mode='video'].is-open .dyn-stage {
+  transition:
+    opacity 180ms var(--bili-ease, ease),
+    transform 220ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    visibility 0s;
+}
+
+.dyn-root.is-open .dyn-stage {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, -50%) scale(1);
+  transition:
+    opacity 180ms var(--bili-ease, ease),
+    transform 220ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    width 240ms var(--bili-ease, ease),
+    visibility 0s;
+}
+
+/* 窗口本体：1px 描边 + 大投影 + 内侧高光，圆角 24。
+   **不加 backdrop-filter**：窗口里是不透明的 iframe（loading 层也是实底白），
+   毛玻璃一帧都露不出来，却要按 1088×663 的面积整片做背景采样 —— 纯白花的 GPU。
+   底色留一点透明度只是为了让圆角那圈和描边有层次。 */
+.dyn-window {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-radius: var(--dyn-radius);
+  background: var(--dyn-surface);
+  border: 1px solid var(--dyn-border);
+  box-shadow: var(--dyn-shadow-4), var(--dyn-edge-glow);
+}
+
+/* 内容区：iframe 从头到尾都是不透明的，靠 loading 层盖着 —— 避免先闪一帧 B 站原版的
+   顶栏 / 背景，再被注入的样式收掉。 */
+.dyn-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  /* 兜底底色：iframe 自己也有白底，但万一它还没绘制（导航中），
+     露出来的也必须是白，而不是窗口那层 68% 半透明的 surface。 */
+  background: var(--dyn-canvas);
+}
+
+/* **iframe 不做 opacity 过渡**（恒为 1，由 loading 层负责「揭开」）。
+   给 iframe 做 opacity 动画时 Chrome 会把它当合成层、按低分辨率纹理先糊一帧 ——
+   实测过渡期间窗口下半部会露出模糊 / 半透明的重影内容（用户截图就是这个）。
+   只让上面的白色占位淡出，视觉上是「白幕揭开」，也不会有合成问题。 */
+.dyn-frame {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--dyn-canvas);
+}
+
+/* loading：图标 + 文字横排居中（bili_cat 用 gif + 文案，这里用 CSS 转圈，不引额外资源）。
+   **`visibility` 必须显式写 visible**：`.dyn-stage` 关闭时是 `visibility: hidden`，
+   而 visibility 是继承属性 —— 不写就等于继承到 hidden，再配上下面那条 180ms 的
+   transition，打开时会「先空窗 300ms，占位才浮出来」（1.2.4 v014 修的就是这一下）。
+   延迟只放在 `.is-loaded` 那一侧：收起时等淡出跑完再 hidden，重新打开时立刻可见。 */
+.dyn-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--dyn-canvas);
+  color: var(--dyn-text-2);
+  font-size: 13px;
+  line-height: 18px;
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity 220ms var(--bili-ease, ease),
+    visibility 0s;
+}
+
+.dyn-body.is-loaded .dyn-loading {
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 260ms var(--bili-ease, ease),
+    visibility 0s linear 260ms;
+}
+
+.dyn-spinner {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgb(10 108 255 / 16%);
+  border-top-color: var(--dyn-accent);
+  animation: dyn-overlay-spin 0.8s linear infinite;
+}
+
+@keyframes dyn-overlay-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ===== 窗口右上角那一行：新标签页 + 关闭 =====
+   位置照 bili_cat 的 `.moment-detail-actions__bar`，只是从窗口下方挪到了上方 ——
+   贴窗口右上角，往上让 12px，两个控件都是白底胶囊 + 投影。
+   放外面而不是盖在内容上：详情页右上角正好是 B 站自己的「⋮ 更多」按钮，压上去会打架。 */
+.dyn-actions {
+  position: absolute;
+  right: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transform: translateY(calc(-100% - 12px));
+}
+
+/* 「在新标签页打开」：白底胶囊，34 高（bili_cat 的 --bew-control-height），
+   静息 92% 不透明度，悬停补满 */
+.dyn-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 9999px;
+  background: var(--dyn-control);
+  color: var(--dyn-text-1);
+  box-shadow: var(--dyn-shadow-2);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  text-decoration: none;
+  opacity: 0.92;
+  transition:
+    opacity 200ms var(--bili-ease, ease),
+    background 160ms var(--bili-ease, ease);
+}
+
+.dyn-open:hover {
+  opacity: 1;
+  background: var(--dyn-control-hover);
+}
+
+.dyn-open:focus-visible {
+  outline: 2px solid var(--dyn-accent);
+  outline-offset: 2px;
+}
+
+.dyn-open svg {
+  display: block;
+}
+
+/* 关闭键：32px 圆形，白底 + 投影，图标 20px */
+.dyn-close {
+  flex: none;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 9999px;
+  place-items: center;
+  background: var(--dyn-control);
+  color: var(--dyn-text-1);
+  box-shadow: var(--dyn-shadow-2);
+  cursor: pointer;
+  transition:
+    background 160ms var(--bili-ease, ease),
+    transform 160ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.dyn-close:hover {
+  background: var(--dyn-control-hover);
+}
+
+.dyn-close:active {
+  transform: scale(0.92);
+}
+
+.dyn-close:focus-visible {
+  outline: 2px solid var(--dyn-accent);
+  outline-offset: 2px;
+}
+
+.dyn-close svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+
+/* ===== 夜间：照 bili_cat 的 dark token =====
+   底 `--bew-bg` = color-mix(#2a2d32, black 20%)、控件 `--bew-elevated-solid` =
+   color-mix(#2a2d32, white 6%)、正文 `--bew-text-1`、描边 rgb(131 131 145 / 16%)。 */
+.dyn-root.is-night {
+  --dyn-border: rgb(131 131 145 / 16%);
+  --dyn-surface: rgb(51 54 59 / 68%);
+  --dyn-canvas: #1f2125;
+  --dyn-text-1: hsl(220 13% 95%);
+  --dyn-text-2: hsl(220 13% 85% / 90%);
+  --dyn-control: #33363b;
+  --dyn-control-hover: #3d4046;
+  --dyn-shadow-4:
+    0 34px 50px -20px rgb(0 0 0 / 14%),
+    0 32px 45px -12px rgb(0 0 0 / 12%),
+    0 30px 40px -8px rgb(0 0 0 / 14%);
+  --dyn-edge-glow:
+    inset 1px 1px 1px -0.5px rgb(255 255 255 / 6%),
+    inset -1px -1px 1px -0.5px rgb(255 255 255 / 3%),
+    inset 0 0 14px rgb(255 255 255 / 3%);
+}
+
+.dyn-root.is-night .dyn-spinner {
+  border-color: rgb(255 255 255 / 16%);
+  border-top-color: var(--dyn-accent);
+}
+
+/* 小窗口 / 矮窗口：窗口贴着视口留 16px，按钮那行改放窗口**里面**右上角 ——
+   否则 -12px - 34px 的按钮行会顶出视口。三个宽度档位都要覆盖（它们的特异性更高）。 */
+@media (max-width: 720px), (max-height: 560px) {
+  .dyn-stage,
+  .dyn-root[data-dyn-layout='text'] .dyn-stage,
+  .dyn-root[data-dyn-layout='media'] .dyn-stage,
+  .dyn-root[data-dyn-mode='video'] .dyn-stage {
+    width: calc(100vw - 16px);
+    height: calc(100dvh - 16px);
+  }
+  .dyn-actions {
+    right: 12px;
+    top: 12px;
+    transform: none;
+  }
+}
+
+/* 系统开了「减少动态效果」：位移 / 缩放 / 淡入全部取消，直接切；转圈放慢一点，
+   免得看起来像卡住。 */
+@media (prefers-reduced-motion: reduce) {
+  .dyn-scrim,
+  .dyn-stage,
+  .dyn-root.is-open .dyn-stage,
+  .dyn-loading,
+  .dyn-body.is-loaded .dyn-loading {
+    transition: none;
+  }
+  .dyn-spinner {
+    animation-duration: 1.6s;
+  }
+}
+
+/* ===== 全屏看图器（在悬浮窗里点动态图片时） =====
+   动态悬浮窗里的图在 iframe 里，B 站自己的 PhotoSwipe 只能铺满 iframe（也就是悬浮窗那一块）。
+   这一层由父页面自己画：覆盖整个浏览器窗口，图片从点击位置 FLIP 放大。
+   背景的模糊 / 明暗由 JS 按「高级材质 → 材质（评论区图片背景）」的同一套参数写进行内样式，
+   和视频评论区点图的效果一致。 */
+.dyn-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  visibility: hidden;
+  pointer-events: none;
+  /* **关闭时 visibility 要延迟**：摘掉 is-open 的那一刻如果立刻 hidden，图片缩回 / 背景淡出
+     两条动画会被当场掐掉 —— 表现就是「只有打开动效，没有关闭动效」（用户报的）。
+     320ms = 图片缩回 290ms + 一点余量。打开时由 `.is-open` 那条 0s 覆盖，不会延迟显示。 */
+  transition: visibility 0s linear 320ms;
+}
+
+.dyn-viewer.is-open {
+  visibility: visible;
+  pointer-events: auto;
+  transition: visibility 0s;
+}
+
+/* 背景单独一层：backdrop-filter 采样的是它下面的一切（悬浮窗 + 页面）。
+   **不要给 `.dyn-viewer` 自己做 opacity 过渡** —— 祖先透明度 < 1 会成为背景根，
+   backdrop-filter 就采样不到后面的内容了（整层会变成一块纯色）。 */
+.dyn-viewer__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgb(0 0 0 / 86%);
+  opacity: 0;
+  transition: opacity 200ms var(--bili-ease, ease);
+}
+
+.dyn-viewer.is-open .dyn-viewer__backdrop {
+  opacity: 1;
+}
+
+/* 图片：位置 / 尺寸由 JS 按「铺满视口」算好，FLIP 走 Web Animations 的 transform */
+.dyn-viewer__img {
+  position: absolute;
+  display: block;
+  max-width: none;
+  max-height: none;
+  opacity: 0;
+  transform-origin: center center;
+  will-change: transform;
+  border-radius: 4px;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 45%);
+}
+
+.dyn-viewer__nav {
+  position: absolute;
+  top: 50%;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  place-items: center;
+  background: rgb(255 255 255 / 14%);
+  color: #fff;
+  cursor: pointer;
+  transform: translateY(-50%);
+  backdrop-filter: blur(8px);
+  transition:
+    background 160ms var(--bili-ease, ease),
+    transform 160ms var(--bili-ease, ease);
+}
+
+.dyn-viewer__nav:hover {
+  background: rgb(255 255 255 / 26%);
+}
+
+.dyn-viewer__nav:active {
+  transform: translateY(-50%) scale(0.94);
+}
+
+.dyn-viewer__nav.is-prev {
+  left: 20px;
+}
+
+.dyn-viewer__nav.is-next {
+  right: 20px;
+}
+
+.dyn-viewer__count {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 42%);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+.dyn-viewer__close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  display: grid;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  place-items: center;
+  background: rgb(255 255 255 / 14%);
+  color: #fff;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: background 160ms var(--bili-ease, ease);
+}
+
+.dyn-viewer__close:hover {
+  background: rgb(255 255 255 / 26%);
+}
+
+.dyn-viewer__close svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+}

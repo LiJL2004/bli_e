@@ -1,0 +1,45 @@
+/* ===== Material 涟漪节点（全仓库唯一一份）=====
+   由 ripple.ts 的 installRipple() 在 pointerdown 时按点击坐标创建（span.blie-ripple），
+   位置 / 直径通过 --rp-x / --rp-y / --rp-size 传进来；样式表也由 installRipple()
+   注入到它所在的根（设置面板 = shadow root，顶栏 / 看图器 / 搜索页 = document），
+   同一个根上多次 install 只注入一次（引用计数），卸载完自动摘掉。
+   动画挂在节点自己身上 —— 松手不会中断，播完 animationend 后由 JS 摘掉。
+
+   1.2.5 v025 之前这里有 4 份逐字相同的副本（panelButton.css / selfTopbar.css §4.1.6 /
+   imageTools.css / searchOptimize.css），只差作用域前缀、keyframes 名和个别属性；
+   `?inline` 导入没法跨 shadow 共享是当时的理由，现在改成「谁装涟漪谁带样式」就没有这个问题了。
+
+   **类名双写是为了提权**：各处都有 `.nav-item > *` / `.tb-media > *` 这种给内容层加
+   `z-index: 1` 的规则，特异性 (0,1,1) 会连涟漪节点一起匹配、把它的 `position: absolute`
+   改成 `relative` —— 那样 300px 的圆就变成真实 flex 子元素，把按钮撑成大椭圆。
+   双写提到 (0,2,0)，永远压得住。
+
+   各处不同的只有「数据」，全走 CSS 变量，宿主上写一行就行：
+   - `--blie-ripple-color`：涟漪颜色，默认 currentColor（⚙ 按钮 color 是 transparent，给白色）；
+   - `--blie-ripple-z`：层级，默认 0（内容层挂 z-index:1 压在涟漪上）；宿主只有裸文本、
+     没法给内容提层时（搜索页的按钮），宿主自己 `isolation: isolate`、这里给 -1，
+     涟漪落在按钮底色之上、文字之下。 */
+.blie-ripple.blie-ripple {
+  position: absolute;
+  left: var(--rp-x, 50%);
+  top: var(--rp-y, 50%);
+  width: var(--rp-size, 100%);
+  height: var(--rp-size, 100%);
+  margin-left: calc(var(--rp-size, 100%) / -2);
+  margin-top: calc(var(--rp-size, 100%) / -2);
+  border-radius: 50%;
+  /* 实色圆（不是径向渐变）：参考页就是 currentColor 的硬边圆 + 0.3 的起始透明度，
+     在白色 / 浅色按钮上按下会铺出一片明显的品牌蓝 —— 就是「白按钮变蓝按钮」那一下。 */
+  background: var(--blie-ripple-color, currentColor);
+  pointer-events: none;
+  z-index: var(--blie-ripple-z, 0);
+  will-change: transform, opacity;
+  transform: scale(0);
+  /* 0.75s 单段：边扩散边淡出。0.55s（参考页）→ 0.75s，用户觉得还是快，再放慢一档 */
+  animation: blie-ripple-wave 0.75s cubic-bezier(0.2, 0, 0, 1) forwards;
+}
+
+@keyframes blie-ripple-wave {
+  from { transform: scale(0); opacity: 0.3; }
+  to { transform: scale(1); opacity: 0; }
+}

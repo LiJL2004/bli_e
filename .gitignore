@@ -29,3 +29,11 @@ key.pem
 
 # 开发文档（面向用户的 README 只保留功能总览与许可证）
 DEVELOPMENT.md
+
+# 本地类型检查脚手架（Windows 侧 managed tsc 用的临时 tsconfig，不进版本库）
+tsconfig.check.json
+check-env.d.ts
+
+# 编辑残留（UNC 路径上改文件只能「改名 + 重建」，偶尔会留下 .tmpold / .new）
+*.tmpold*
+*.new*

@@ -1,0 +1,577 @@
+/*
+ * 夜间模式（「个性设置 → 夜间模式」；1.1.1 从实验室转正）
+ *
+ * 两层：
+ *   1. 打开这个开关时会**同时把 B 站自己的夜间打开** —— 页面主体（视频卡、评论区、
+ *      动态流）那套深色样式 B 站自己写得很全，没必要重做一遍，而且只用我们自己的
+ *      配色去盖整站，反而会漏掉一半表面。B 站有两套主题机制：首页 / 动态页认
+ *      `html.bili_dark` 类，视频页 / 搜索页 / 历史记录 / 个人空间认主题样式表
+ *      （`light.css` ↔ `dark.css`）。两边都要动，细节见 labFeatures.ts。
+ *   2. 下面这些规则只负责「B 站没管、或者和我们的改造打架」的地方：顶栏、搜索框、
+ *      搜索面板、顶栏触发的浮层，以及首页卡片的描边 / 悬停衬底。
+ *
+ * 配色：顶栏 #1a1b1f 渐变（往下略微压暗，避免整条纯色显得发灰），面板卡片 #202226，
+ * 描边统一 白 8%，强调色 #6fb0ff —— 比品牌蓝 #00aeec 在深底上对比度高一档。
+ *
+ * 选择器里带 body 是为了稳定压过 topbar.css 里那些 `!important` 的浅色规则
+ * （多一个元素选择器，同权重下必然赢），不依赖样式表注入顺序。
+ */
+
+/* ===== 1. 顶栏 ===== */
+/* 用 inset 阴影画下缘那道发丝线，不用 border —— border 会把 64px 的顶栏撑高 1px，
+   下面所有内容跟着跳。 */
+html.bili-elite-night body .bili-header .bili-header__bar {
+  background: linear-gradient(180deg, #1a1b1f 0%, #17181c 100%) !important;
+  box-shadow:
+    inset 0 -1px 0 rgba(255, 255, 255, 0.08),
+    0 8px 24px rgba(0, 0, 0, 0.42) !important;
+}
+
+/* 1.1 文字 / 图标（SVG 走 currentColor）。「投稿」是粉色按钮、本来就白字，排除在外 */
+html.bili-elite-night body .bili-header .bili-header__bar .left-entry,
+html.bili-elite-night body .bili-header .bili-header__bar .right-entry,
+html.bili-elite-night body .bili-header .bili-header__bar .left-entry__item-trigger,
+html.bili-elite-night body .bili-header .bili-header__bar .right-entry__item:not(.right-upload-entry),
+html.bili-elite-night body .bili-header .bili-header__bar .right-entry__item:not(.right-upload-entry) .trigger-text {
+  color: rgba(255, 255, 255, 0.92) !important;
+}
+html.bili-elite-night body .bili-header .bili-header__bar .left-entry__item-trigger:hover,
+html.bili-elite-night body .bili-header .bili-header__bar .right-entry__item:not(.right-upload-entry):hover,
+html.bili-elite-night body .bili-header .bili-header__bar .right-entry__item:not(.right-upload-entry):hover .trigger-text {
+  color: #6fb0ff !important;
+}
+
+/* 1.2 顶栏材质开着时：玻璃层换成深色遮罩。这里只换颜色，模糊 / 结构仍由 topbar.css 负责。
+   遮罩强度兜一个 max() 下限：「顶栏材质」的滑块是按浅色主题调的（默认 62%），
+   深色遮罩按 62% 铺在白色页面上会变成一块灰 —— 下限保证夜间这条顶栏始终是深的，
+   滑块往上拉仍然更不透明。 */
+html.bili-elite-night.bili-elite-glass body .bili-header .bili-header__bar {
+  background: transparent !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.36) !important;
+}
+html.bili-elite-night.bili-elite-glass body .bili-header .bili-header__bar::before,
+html.bili-elite-night.bili-elite-glass body .bili-header.fixed-header::before {
+  background-color: rgba(26, 27, 31, max(0.72, var(--bili-topbar-tint, 0.62))) !important;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0) 62%) !important;
+  /* 关键：白天那套 backdrop-filter 是「提亮」（brightness 1.08），夜间必须反过来压暗 ——
+     只叠半透明深色的话，白底透上来就是一块灰，顶栏看着根本不「深」 */
+  -webkit-backdrop-filter: blur(var(--bili-topbar-blur, 24px)) saturate(180%) brightness(0.55) !important;
+  backdrop-filter: blur(var(--bili-topbar-blur, 24px)) saturate(180%) brightness(0.55) !important;
+  border-bottom-color: rgba(255, 255, 255, 0.08) !important;
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+/* 1.2.1 「顶栏渐变」在夜间同样要生效：上面那条是实色遮罩，会把渐变整块盖住
+   （等于夜间开渐变没反应）。这里把底色让出来，换成同色系的渐变 ——
+   顶上仍是不透明的深色（图标读得清），往下逐步透出压暗后的页面内容。
+   段位和 topbar.css 里那条白天的一一对应：遮罩（mask）在那边，两边共用，
+   所以这里只要把「白纱」换成深色，节奏就自然一致了。 */
+html.bili-elite-night.bili-elite-glass.bili-elite-topbar-fade body .bili-header .bili-header__bar,
+html.bili-elite-night.bili-elite-glass.bili-elite-topbar-fade body .bili-header.fixed-header {
+  box-shadow: none !important;
+}
+html.bili-elite-night.bili-elite-glass.bili-elite-topbar-fade body .bili-header .bili-header__bar::before,
+html.bili-elite-night.bili-elite-glass.bili-elite-topbar-fade body .bili-header.fixed-header::before {
+  background-color: transparent !important;
+  background-image: linear-gradient(
+    180deg,
+    rgba(26, 27, 31, 0.98) 0%,
+    rgba(26, 27, 31, 0.96) 45%,
+    rgba(26, 27, 31, 0.86) 70%,
+    rgba(26, 27, 31, 0.62) 86%,
+    rgba(26, 27, 31, 0.26) 96%,
+    rgba(26, 27, 31, 0) 100%
+  ) !important;
+}
+
+/* 1.3.1 自绘顶栏（顶栏优化）：和上面原生顶栏那套同一组配色 ——
+   顶栏底、文字、搜索框、搜索面板、图标悬停底。玻璃 / 渐变两条直接复用 1.2 的深色遮罩。 */
+html.bili-elite-night #bili-elite-tb {
+  background: linear-gradient(180deg, #1a1b1f 0%, #17181c 100%);
+  color: rgba(255, 255, 255, 0.92);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.08);
+}
+html.bili-elite-night.bili-elite-glass #bili-elite-tb {
+  background: transparent;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.36);
+}
+html.bili-elite-night.bili-elite-glass #bili-elite-tb::before {
+  background-color: rgba(26, 27, 31, max(0.72, var(--bili-topbar-tint, 0.62))) !important;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0) 62%) !important;
+  -webkit-backdrop-filter: blur(var(--bili-topbar-blur, 24px)) saturate(180%) brightness(0.55) !important;
+  backdrop-filter: blur(var(--bili-topbar-blur, 24px)) saturate(180%) brightness(0.55) !important;
+  border-bottom-color: rgba(255, 255, 255, 0.08) !important;
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.08) !important;
+}
+html.bili-elite-night.bili-elite-glass.bili-elite-topbar-fade #bili-elite-tb {
+  box-shadow: none;
+}
+html.bili-elite-night.bili-elite-glass.bili-elite-topbar-fade #bili-elite-tb::before {
+  background-color: transparent !important;
+  background-image: linear-gradient(
+    180deg,
+    rgba(26, 27, 31, 0.98) 0%,
+    rgba(26, 27, 31, 0.96) 45%,
+    rgba(26, 27, 31, 0.86) 70%,
+    rgba(26, 27, 31, 0.62) 86%,
+    rgba(26, 27, 31, 0.26) 96%,
+    rgba(26, 27, 31, 0) 100%
+  ) !important;
+  border-bottom-color: transparent !important;
+}
+html.bili-elite-night #bili-elite-tb .tb-icon:hover,
+html.bili-elite-night #bili-elite-tb .tb-login:hover {
+  color: #6fb0ff;
+  /* v029 由 0.08 加深到 0.10：与白天模式那套「悬停阴影略微加深」同步（仍逐字相同） */
+  background: rgba(255, 255, 255, 0.10);
+}
+html.bili-elite-night #bili-elite-tb .tb-entry > a:hover,
+html.bili-elite-night #bili-elite-tb .tb-entry.is-open > a {
+  color: #6fb0ff;
+  /* 与上面 `.tb-icon:hover` 的夜间值一致（1.2.1 v007 起左侧也有衬底了；v029 同步加深） */
+  background: rgba(255, 255, 255, 0.10);
+}
+html.bili-elite-night #bili-elite-tb .tb-search-form {
+  background: rgba(255, 255, 255, 0.08);
+}
+html.bili-elite-night #bili-elite-tb .tb-search-form:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+html.bili-elite-night #bili-elite-tb .tb-search.is-focus .tb-search-form {
+  background: #232428;
+  /* 聚焦光环在 ::after 上，这里只换颜色 */
+  --bili-search-ring: #6fb0ff;
+  --bili-search-ring-40: rgba(111, 176, 255, 0.4);
+  --bili-search-ring-30: rgba(111, 176, 255, 0.3);
+}
+html.bili-elite-night #bili-elite-tb .tb-search-input {
+  color: rgba(255, 255, 255, 0.92);
+}
+html.bili-elite-night #bili-elite-tb .tb-search-input::placeholder {
+  color: #8b8f96;
+}
+html.bili-elite-night #bili-elite-tb .tb-search-btn {
+  color: rgba(255, 255, 255, 0.92);
+}
+html.bili-elite-night #bili-elite-tb .tb-search-form:hover .tb-search-btn,
+html.bili-elite-night #bili-elite-tb .tb-search.is-focus .tb-search-btn,
+html.bili-elite-night #bili-elite-tb .tb-search-btn:hover {
+  color: #6fb0ff;
+}
+html.bili-elite-night #bili-elite-tb .tb-search-btn::after {
+  background: #6fb0ff;
+}
+html.bili-elite-night #bili-elite-tb .tb-sp {
+  background: #202226;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+html.bili-elite-night #bili-elite-tb .tb-sp-title {
+  color: rgba(255, 255, 255, 0.92);
+}
+html.bili-elite-night #bili-elite-tb .tb-sp-clear,
+html.bili-elite-night #bili-elite-tb .tb-sp-empty {
+  color: #8b8f96;
+}
+/* 历史区的「展开 / 收起」：文字与那条分隔线都要跟着深色走，
+   否则亮色 #f1f2f3 的线会在深底上变成一道白光 */
+html.bili-elite-night #bili-elite-tb .tb-sp-fold {
+  color: #8b8f96;
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+html.bili-elite-night #bili-elite-tb .tb-sp-fold:hover {
+  color: #6fb0ff;
+}
+html.bili-elite-night #bili-elite-tb .tb-sp-rank {
+  color: rgba(255, 255, 255, 0.92);
+}
+html.bili-elite-night #bili-elite-tb .tb-sp-row {
+  color: rgba(255, 255, 255, 0.92);
+}
+html.bili-elite-night #bili-elite-tb .tb-sp-row.is-hot:hover,
+html.bili-elite-night #bili-elite-tb .tb-sp-row.is-hot.is-active,
+html.bili-elite-night #bili-elite-tb .tb-sp-suggest-list .tb-sp-row:hover,
+html.bili-elite-night #bili-elite-tb .tb-sp-suggest-list .tb-sp-row.is-active {
+  background: rgba(255, 255, 255, 0.08);
+}
+html.bili-elite-night #bili-elite-tb .tb-sp-chip {
+  background: rgba(255, 255, 255, 0.08);
+}
+html.bili-elite-night #bili-elite-tb .tb-sp-chip:hover,
+html.bili-elite-night #bili-elite-tb .tb-sp-chip.is-active {
+  background: rgba(255, 255, 255, 0.14);
+  color: #6fb0ff;
+}
+html.bili-elite-night #bili-elite-tb .tb-sp-chip-del {
+  color: rgba(255, 255, 255, 0.4);
+}
+html.bili-elite-night #bili-elite-tb .tb-avatar-img {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+/* 右侧悬停浮层（纯白卡片那套）：底色 / 文字 / 分割线 / 悬停底
+   材质关着时是一块实底卡片；材质开着时换成深色玻璃，见下面那条 */
+html.bili-elite-night #bili-elite-tb .tb-pop-card {
+  background: #202226;
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.5);
+}
+/* 「触发面板材质」开着时的悬停浮层：和 §4 频道面板 / §4.3 ⋮ 菜单同一套深色玻璃值
+   （底色取遮罩滑块与 78% 的较大者，浅色遮罩也压得住；模糊降饱和、压暗） */
+html.bili-elite-night.bili-elite-homepanel-glass #bili-elite-tb .tb-pop-card {
+  background-color: rgba(26, 27, 31, max(0.78, var(--bili-homepanel-tint, 0.61)));
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0) 70%);
+  -webkit-backdrop-filter: blur(var(--bili-homepanel-blur, 38px)) saturate(180%) brightness(0.55);
+  backdrop-filter: blur(var(--bili-homepanel-blur, 38px)) saturate(180%) brightness(0.55);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 18px 44px rgba(0, 0, 0, 0.42),
+    0 4px 12px rgba(0, 0, 0, 0.28);
+}
+html.bili-elite-night.bili-elite-homepanel-glass #bili-elite-tb .tb-media:hover,
+html.bili-elite-night.bili-elite-homepanel-glass #bili-elite-tb .tb-fav-cat:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+html.bili-elite-night #bili-elite-tb .tb-pop-title,
+html.bili-elite-night #bili-elite-tb .tb-media,
+html.bili-elite-night #bili-elite-tb .tb-media-title,
+html.bili-elite-night #bili-elite-tb .tb-fav-cat,
+html.bili-elite-night #bili-elite-tb .tb-user-name,
+html.bili-elite-night #bili-elite-tb .tb-user-coins a,
+html.bili-elite-night #bili-elite-tb .tb-user-counts a {
+  color: rgba(255, 255, 255, 0.92);
+}
+/* 切换按钮（顶部 tab / 收藏夹）在深色下换一档蓝：10% 的 #0A6CFF 铺在 #202226 上几乎看不见，
+   改用面板夜间那套 rgba(111, 176, 255, .16)（与 panel.css 的 .panel.is-night .nav-item 同值）。 */
+html.bili-elite-night #bili-elite-tb .tb-pop-tab,
+html.bili-elite-night #bili-elite-tb .tb-fav-cat {
+  background-image: linear-gradient(90deg, rgba(111, 176, 255, 0.16), rgba(111, 176, 255, 0.16));
+}
+html.bili-elite-night #bili-elite-tb .tb-pop-tab {
+  color: #8b8f96;
+}
+html.bili-elite-night #bili-elite-tb .tb-pop-tab:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+html.bili-elite-night #bili-elite-tb .tb-pop-tab.is-active {
+  color: #6fb0ff;
+}
+html.bili-elite-night #bili-elite-tb .tb-pop-tab.is-active:hover {
+  background-color: transparent;
+}
+html.bili-elite-night #bili-elite-tb .tb-pop-action,
+html.bili-elite-night #bili-elite-tb .tb-msg-item,
+html.bili-elite-night #bili-elite-tb .tb-user-link {
+  color: #a2a6ad;
+}
+html.bili-elite-night #bili-elite-tb .tb-pop-action:hover,
+html.bili-elite-night #bili-elite-tb .tb-msg-item:hover,
+html.bili-elite-night #bili-elite-tb .tb-user-link:hover {
+  color: #6fb0ff;
+}
+/* 未读气泡的描边圈跟着顶栏底色走，深色下用顶栏那块深灰而不是白色 */
+html.bili-elite-night #bili-elite-tb .tb-badge {
+  --bili-tb-badge-ring: #1a1b1f;
+}
+html.bili-elite-night #bili-elite-tb .tb-media:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+/* 收藏夹按钮改成「淡蓝色擦除」之后，悬停只能改 background-color —— 用 background 简写
+   会把 background-image / background-size 一起重置，擦除动画就断了（白天那份同理）。 */
+html.bili-elite-night #bili-elite-tb .tb-fav-cat:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+html.bili-elite-night #bili-elite-tb .tb-fav-cat.is-active {
+  color: #6fb0ff;
+}
+html.bili-elite-night #bili-elite-tb .tb-fav-cat.is-active:hover {
+  background-color: transparent;
+}
+html.bili-elite-night #bili-elite-tb .tb-media-author,
+html.bili-elite-night #bili-elite-tb .tb-media-meta,
+html.bili-elite-night #bili-elite-tb .tb-media-time,
+html.bili-elite-night #bili-elite-tb .tb-pop-empty,
+html.bili-elite-night #bili-elite-tb .tb-user-coins span,
+html.bili-elite-night #bili-elite-tb .tb-user-counts span {
+  color: #8b8f96;
+}
+html.bili-elite-night #bili-elite-tb .tb-user-split {
+  background: rgba(255, 255, 255, 0.08);
+}
+html.bili-elite-night #bili-elite-tb .tb-media-frame,
+html.bili-elite-night #bili-elite-tb .tb-media-face,
+html.bili-elite-night #bili-elite-tb .tb-user-face {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* 1.4 动态页的装饰底图（`#app > .bg`：一张 fixed、cover 的浅色 pastel 图）
+   深色下 B 站没把它一起关掉 —— 顶栏 64px、内容从 72px 开始，中间这 8px 的缝里
+   就露出一条发白的横带（实测 rgb(130,144,144)），看着像顶栏底边有条白边。
+   这里把底图换成页面底色：整页背板变平，那条缝自然和卡片区连成一片。
+   这两个 div 只有动态页有（其余五类页面查不到），不用再限定页面。 */
+html.bili-elite-night #app > .bg {
+  background-image: none !important;
+  background-color: var(--bg1, #17181a) !important;
+}
+
+/* 1.5 悬停光晕的夜间配色（结构见 topbar.css §2.3）。
+   白天用品牌蓝 #00aeec，深底上换成强调色 #6fb0ff —— 顶栏文字 hover 也是这个色，
+   光晕和文字同一个调子。选择器带 .bili-elite-home-opt 是为了稳压 topbar.css 里
+   那条同权重的 `html.bili-elite-home-opt` 声明，不依赖样式表的注入顺序。 */
+html.bili-elite-night.bili-elite-home-opt {
+  --bili-glow: 111, 176, 255;
+}
+
+/* ===== 2. 搜索框 ===== */
+html.bili-elite-night body .bili-header .center-search-container .center-search__bar #nav-searchform {
+  background-color: #202226 !important;
+  background-image: none !important;
+}
+/* 「搜索框材质」开着时保留毛玻璃，只把白色遮罩换成深色 */
+html.bili-elite-night.bili-elite-searchbox-glass body .bili-header .center-search-container .center-search__bar #nav-searchform {
+  background-color: rgba(26, 27, 31, max(0.72, var(--bili-searchbox-tint, 0.62))) !important;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0) 62%) !important;
+  -webkit-backdrop-filter: blur(var(--bili-searchbox-blur, 20px)) saturate(180%) brightness(0.6) !important;
+  backdrop-filter: blur(var(--bili-searchbox-blur, 20px)) saturate(180%) brightness(0.6) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 2px 10px rgba(0, 0, 0, 0.35) !important;
+}
+html.bili-elite-night .bili-header .nav-search-input {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+html.bili-elite-night .bili-header .nav-search-input::placeholder {
+  color: rgba(255, 255, 255, 0.4) !important;
+}
+/* 焦点态 B 站会给输入区再铺一层白 / 灰底，一并中和掉 */
+html.bili-elite-night .bili-header .nav-search-content,
+html.bili-elite-night .bili-header .nav-search-content .nav-search-input:focus {
+  background-color: transparent !important;
+}
+html.bili-elite-night .bili-header .nav-search-btn {
+  background-color: #2b2e34 !important;
+  color: rgba(255, 255, 255, 0.72) !important;
+}
+
+/* ===== 3. 搜索面板（搜索历史 / 热搜） ===== */
+html.bili-elite-night body .bili-header .search-panel {
+  background-color: #202226 !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5) !important;
+}
+html.bili-elite-night.bili-elite-searchpanel-glass body .bili-header .search-panel {
+  background-color: rgba(26, 27, 31, max(0.78, var(--bili-searchpanel-tint, 0.76))) !important;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0) 70%) !important;
+  -webkit-backdrop-filter: blur(var(--bili-searchpanel-blur, 30px)) saturate(180%) brightness(0.55) !important;
+  backdrop-filter: blur(var(--bili-searchpanel-blur, 30px)) saturate(180%) brightness(0.55) !important;
+}
+html.bili-elite-night .bili-header .search-panel .header .title {
+  color: #e6e8ec !important;
+}
+html.bili-elite-night .bili-header .search-panel .header .clear {
+  color: rgba(255, 255, 255, 0.5) !important;
+}
+html.bili-elite-night .bili-header .histories .history-item {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #e6e8ec !important;
+}
+html.bili-elite-night .bili-header .histories .history-item:hover,
+html.bili-elite-night .bili-header .histories .history-item:focus {
+  background: rgba(255, 255, 255, 0.14) !important;
+  color: #6fb0ff !important;
+}
+html.bili-elite-night .bili-header .trending-item.active,
+html.bili-elite-night .bili-header .trending-item:hover,
+html.bili-elite-night .bili-header .trending-item:focus {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* ===== 4. 顶栏触发的浮层 ===== */
+/* 4.1 自绘频道面板（顶栏「首页」悬停） */
+html.bili-elite-night #bili-elite-home-panel .bili-elite-panel-card {
+  background: #202226;
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.5);
+}
+html.bili-elite-night #bili-elite-home-panel .bili-header-channel-panel {
+  background: #202226;
+}
+html.bili-elite-night #bili-elite-home-panel .channel-panel__item {
+  color: #e6e8ec;
+}
+html.bili-elite-night #bili-elite-home-panel .channel-panel__item:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #6fb0ff;
+}
+/* 「触发面板材质」开着时：玻璃层换深色 */
+html.bili-elite-night.bili-elite-homepanel-glass #bili-elite-home-panel .bili-elite-panel-card {
+  background-color: rgba(26, 27, 31, max(0.78, var(--bili-homepanel-tint, 0.61))) !important;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0) 70%) !important;
+  -webkit-backdrop-filter: blur(var(--bili-homepanel-blur, 38px)) saturate(180%) brightness(0.55) !important;
+  backdrop-filter: blur(var(--bili-homepanel-blur, 38px)) saturate(180%) brightness(0.55) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+html.bili-elite-night.bili-elite-homepanel-glass #bili-elite-home-panel .bili-header-channel-panel {
+  background: transparent !important;
+}
+
+/* 4.2 头像 / 消息 / 动态 / 收藏 / 历史的悬停浮层：只换容器底色。
+   内层是 B 站自己的组件（登录卡、消息列表…），各自带白底和深色文字 ——
+   强行全部透明化会让文字看不见，保持原样反而更好读。 */
+html.bili-elite-night .bili-header .v-popover .v-popover-content {
+  background-color: #202226 !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* 4.3 卡片右下角「⋮」的悬停菜单（内容不感兴趣 / 不想看此UP主）——
+   结构见 topbar.css §7.5。这里只换玻璃层和条目悬停底：条目的文字颜色走 B 站自己的
+   夜间变量（这个开关会同时打开站点夜间），不用管。 */
+html.bili-elite-night body .vui_popover-content.bili-video-card__info--popover,
+html.bili-elite-night body .vui_popover-content.bili-live-card__info--popover {
+  background-color: #202226 !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+html.bili-elite-night.bili-elite-homepanel-glass body .vui_popover-content.bili-video-card__info--popover,
+html.bili-elite-night.bili-elite-homepanel-glass body .vui_popover-content.bili-live-card__info--popover {
+  background-color: rgba(26, 27, 31, max(0.78, var(--bili-homepanel-tint, 0.61))) !important;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0) 70%) !important;
+  -webkit-backdrop-filter: blur(var(--bili-homepanel-blur, 38px)) saturate(180%) brightness(0.55) !important;
+  backdrop-filter: blur(var(--bili-homepanel-blur, 38px)) saturate(180%) brightness(0.55) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+html.bili-elite-night.bili-elite-homepanel-glass body .bili-video-card__info--no-interest-panel--item:hover,
+html.bili-elite-night.bili-elite-homepanel-glass body .bili-live-card__info--no-interest-panel--item:hover {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  color: #6fb0ff !important;
+}
+
+/* ===== 5. 首页 / 搜索页 / 视频页卡片：B 站原生夜间下的配色微调 =====
+   `bili_dark` 把页面底、卡片、文字都换掉了，但「卡片悬停变灰」那组规则
+   （见 topbar.css §12.3）里写死的是浅色值：
+     · 悬停衬底 rgb(131 131 145 / 30%) —— 铺在 #18191c 上灰被底色吃掉，等于没反馈
+   这里把两个 token 各降一档（20% / 30%），和 BewlyCat 夜间一致
+   （出处与许可见 THIRD-PARTY-NOTICES.md）。
+   （「卡片边界」的描边配色 1.2.5 v014 随那三个开关一起删掉了。） */
+
+/* 卡片悬停变灰在深色下不能照抄白天那三成透明度：`rgb(131 131 145 / 30%)` 铺在
+   `#18191c` 这种深底上几乎看不出来（灰被底色吃掉了）。BewlyCat 夜间把同两个 token
+   各降一档（--bew-fill-2 30% → 20%、--bew-fill-3 45% → 30%），这里照搬。
+   只重定义变量：规则本体在 topbar.css §12.3，不用再写一遍选择器。 */
+html.bili_dark .recommended-container_floor-aside .container > *:not(.load-more-anchor),
+html.bili_dark .search-page .video-list .bili-video-card,
+html.bili_dark .recommend-list-v1 .video-page-card-small {
+  --bili-card-fill: rgb(131 131 145 / 20%);
+  --bili-card-fill-active: rgb(131 131 145 / 30%);
+}
+
+/* 5.1 首页加载占位在深色下不能还是浅灰：topbar.css §16 给的卡底 `#f7f9fc` 铺在
+   `#0a0b0c` 上是一整块发光的白板，灰块 `#d3dbe5` 更亮。这里换成白色透明度：
+   卡底 6% 白、灰块 16% 白。
+
+   **选择器必须和 topbar.css §16 那条逐字对齐**（1.2.0 v009 修）：原来这里写的是
+   `.container > .bili-video-card:has(...)` / `>.floor-single-card:has(...)` —— 只认
+   「栅格子项本身就是这两种卡」。可 §16 那条是 `*:has(...)`，**被 `.feed-card` 包一层
+   的骨架格也算**。于是「白天有底、夜里没底」，夜里那格就是一块 `#f7f9fc` 的白卡
+   （用户截图里那格白底 + 深色封面块，量出来正好是 247,249,252）。
+   直播骨架 `--cover/--text/--light` 也是同一回事：原来两边都没列，现在是「两种加载动画」。
+
+   漏掉的另外两处一并补上：`.bili-elite-cell-blank`（§16.1.3 的空壳格）和
+   `.load-more-anchor::before`（§16.1.2 哨兵兜底底）—— 它们白天都是 `#f7f9fc`，
+   夜间没有对应规则，会各自露出一块白。
+   `border-color: transparent` 对齐 §16.1：B 站给 `.floor-card` 写死
+   `border: 1px solid #e3e5e7`，夜里那圈白边就是它。 */
+html.bili_dark.bili-elite-home-opt .recommended-container_floor-aside .container > *:not(.load-more-anchor):has(.bili-video-card__skeleton:not(.hide), .floor-skeleton, .bili-live-card__skeleton:not(.hide)),
+html.bili_dark.bili-elite-home-opt .recommended-container_floor-aside .container > .load-more-anchor > *:has(.floor-skeleton, .bili-live-card__skeleton:not(.hide)),
+html.bili_dark.bili-elite-home-opt .bili-elite-skeleton-fill__cell,
+html.bili_dark.bili-elite-home-opt .bili-elite-ghost-fill__cell,
+html.bili_dark.bili-elite-home-opt .bili-elite-cell-blank,
+html.bili_dark.bili-elite-home-opt .recommended-container_floor-aside .container > .load-more-anchor::before {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+  border-color: transparent !important;
+}
+
+/* 灰块的底色与斜向亮带：白天是 1.0.3 那版的 `#e9ecf0` 渐变，夜间换成白色低透明度 ——
+   深底上直接用 #e9ecf0 会是一整块发光的白板。段位与白天一致（14% → 20% → 14%）。
+   直播骨架那三个类名同样并进来，和白天 §16.3 保持一致。 */
+html.bili_dark.bili-elite-home-opt .recommended-container_floor-aside .bili-video-card__skeleton--cover,
+html.bili_dark.bili-elite-home-opt .recommended-container_floor-aside .bili-video-card__skeleton--text,
+html.bili_dark.bili-elite-home-opt .recommended-container_floor-aside .bili-video-card__skeleton--light,
+html.bili_dark.bili-elite-home-opt .recommended-container_floor-aside .bili-live-card__skeleton--cover,
+html.bili_dark.bili-elite-home-opt .recommended-container_floor-aside .bili-live-card__skeleton--text,
+html.bili_dark.bili-elite-home-opt .recommended-container_floor-aside .bili-live-card__skeleton--light,
+html.bili_dark.bili-elite-home-opt .recommended-container_floor-aside .floor-skeleton .skeleton-item {
+  background-color: rgba(255, 255, 255, 0.14) !important;
+  background-image: linear-gradient(120deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.2) 46%, rgba(255, 255, 255, 0.14)) !important;
+}
+
+/* 5.2 「已关注」胶囊（topbar.css §18）的夜间配色。白天那组 #D3E3FD 底 / #041E49 字
+   铺在 #18191c 上是一整块发光的浅蓝，夜里比标题还抢眼。换成低透明度蓝底 + 浅蓝字，
+   和顶栏夜间那套蓝同一档；勾（mask 上色）跟着一起换。选择器带 body 是为了稳定压过
+   topbar.css 那条同权重的规则。 */
+html.bili_dark body .bili-video-card__info--icon-text.bili-elite-followed {
+  background: rgba(138, 180, 248, 0.18);
+  color: #d3e3fd;
+}
+
+html.bili_dark body .bili-video-card__info--icon-text.bili-elite-followed::before {
+  background-color: #8ab4f8;
+}
+
+/* 5.3 搜索页筛选按钮（searchOptimize.css「筛选按钮」）的夜间配色：
+   排序行 / 展开的芯片 / 直播页筛选行 / live-type-btn / .i_button_more 都在内。
+   白天那组 #D3E3FD 底 / #1A73E8 字铺在 B 站搜索页的深底上是一块发光的浅蓝，
+   和 5.2 同一个问题：换成面板夜间同款（#394457 底 + #8AB4F8 字）。
+   必须同时要求 bili-elite-search-only：搜索页优化关掉时按钮回到 B 站原样，
+   夜间不该再碰它。选择器带 body 与同文件约定一致。 */
+html.bili-elite-night.bili-elite-search-only body :is(.search-conditions, .live-condition) .vui_button--tab,
+html.bili-elite-night.bili-elite-search-only body .search-page-live .live-room .room-header .live-type-btn,
+html.bili-elite-night.bili-elite-search-only body .i_button_more {
+  color: #E8EAED;
+}
+html.bili-elite-night.bili-elite-search-only body :is(.search-conditions, .live-condition) .vui_button--tab.vui_button--active,
+html.bili-elite-night.bili-elite-search-only body .search-page-live .live-room .room-header .live-type-btn.vui_button--active {
+  background-color: #394457;
+  color: #8AB4F8;
+}
+
+/* 5.4 搜索页分类标签栏（searchOptimize.css「分类标签栏」）的夜间配色：照用户给的 demo
+   的 [data-theme="dark"] 那组令牌（text #E8EAED / text-2 #9AA0A6 / outline #5F6368，
+   蓝色不变）。 */
+html.bili-elite-night.bili-elite-search-only body .search-tabs .vui_tabs--nav {
+  border-bottom-color: #5F6368;
+}
+html.bili-elite-night.bili-elite-search-only body .search-tabs .vui_tabs--nav-item {
+  color: #9AA0A6;
+}
+html.bili-elite-night.bili-elite-search-only body .search-tabs .vui_tabs--nav-text {
+  color: #9AA0A6;
+}
+html.bili-elite-night.bili-elite-search-only body .search-tabs .vui_tabs--nav-item:hover .vui_tabs--nav-text {
+  color: #E8EAED !important;
+}
+html.bili-elite-night.bili-elite-search-only body .search-tabs .vui_tabs--nav-num {
+  color: #9AA0A6;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* ===== 6. 消息中心（message.bilibili.com）=====
+   消息中心不是主站那套页面壳，而是一个独立的 `2233-monorepo/message-pc` 应用。
+   它的主题**只看 cookie `theme_style`**（`created()` 里读一次），不看 `bili_dark`
+   类；页面主体是 B 站自己的调色板（`html.bili_dark` 里的 `--bg1` / `--text1` 等，
+   加类就会跟着变），但那张铺满整屏的背景图是 Vue 里 `theme` 状态拼出来的：
+
+     bgSrc = `.../${this.theme}_bg.png`     // theme 初始值固定是 'light'
+
+   我们从外面挂 `bili_dark` 时它的 `theme` 仍然是 'light'，于是内容变深了、背景图还是
+   那张浅色 pastel —— 用户看到的就是「消息中心夜间模式背景还是亮的」。
+   不去改 B 站 cookie（那会影响整站、关掉扩展后还会残留），这里直接把背景图换成
+   同目录的 `dark_bg.png`；`.message-bg` 的 `background-size / position` 是页面自带的，
+   只覆盖 image 不影响铺满方式。`#skeleton-bg` 也带 `.message-bg`，首屏骨架那一帧
+   同样被覆盖，不会先闪一下亮色再变深。 */
+html.bili-elite-night body .message-bg {
+  background-image: url("//i0.hdslb.com/bfs/seed/jinkela/short/message/img/dark_bg.png") !important;
+}
+/* 背景色层（深色主题的同一个值：#1D2736）。页面自己的 `.bili_dark .message-bgc`
+   已经会生效，这里再兜一条 —— 万一哪天 B 站只清掉 `bili_dark` 类而我们的类还在。 */
+html.bili-elite-night body .message-bgc {
+  background-color: #1D2736 !important;
+}

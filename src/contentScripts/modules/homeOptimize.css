@@ -1,0 +1,60 @@
+/* ===== 首页优化 · 内容区布局 =====
+   原先是独立的「实验室 · 首页 beta」，现在并进「界面优化 → 首页优化」，跟着那个开关走
+   （默认开启），所以这里全部挂在 html.bili-elite-home-only 上。
+
+   B 站原样：留白写死两档（< 1680 是 60px、≥ 1680 是 140px），内容区封顶 2260px，
+   栅格固定 5 列 —— 于是窗口越宽白边占比越大（1920 是 7.3%、2560 是 11.3%），
+   右下角那颗 ⚙ 飘在一大片空地上。
+   整页还套在一个匿名 div 里封顶 2560px（>2560 的屏幕上光这一层就吃掉 440px）。
+
+   这里：
+   1. 留白固定成 `--bili-edge`（10px），**和播放页 / 搜索页是同一条边**（1.2.0 v005）。
+      以前是一条 clamp(32px, 2.4vw, 72px) 的窄栏，窗口一宽就自己变宽 —— 三页永远对不齐。
+      右下角那颗 ⚙ 会压住最后一列卡片的右边缘一块，它和 B 站自己的「返回顶部」一样是浮层，
+      不占布局、也不改内容宽度。
+   2. 内容区不再封顶，列数交给 auto-fill 自己排。B 站是固定 5 列，窗口一宽卡片就跟着
+      变胖（1920 已经 312px、2560 到 380px）；auto-fill 让多出来的宽度多排一列。
+      列宽由 --bili-home-card 决定（设置面板里「首页优化」那张卡的「卡片大小」滑块，
+      默认 320px）。它是**下限**：剩余宽度会均分给各列，所以实际卡片比它略宽，
+      拖滑块是「多一列 / 少一列」的阶梯式变化，不是像素级平滑。
+   3. 预留滚动条槽位（`scrollbar-gutter`），首帧到加载完宽度不变 —— 见下面那条注释。 */
+
+html.bili-elite-home-only {
+  --bili-home-gutter: var(--bili-edge, 10px);
+}
+
+/* 首帧「整屏横移」的根治（1.2.0 v008）。
+   首页刚打开 / 刷新时，第一帧还只有顶栏（文档高 753 < 视口），没有竖向滚动条；
+   信息流一渲染出来就溢出 → 滚动条出现 → clientWidth 1584 → 1567。
+   滚动条占掉 17px 之后，居中 / 贴右的东西全部横移半格（8.5px），整屏「震」一下。
+   这里直接把滚动条**常驻**：宽度从头到尾都是 1567，不管内容多高。
+   **为什么不是 `scrollbar-gutter: stable`**（实测过，不行）：<html> 上的 overflow 会
+   传播给视口、html 自己退化成 `visible`，Chrome 在这种情况下不认 html 的
+   scrollbar-gutter —— 隔离页面里能生效，在 B 站这份文档上实测 `clientWidth` 照样
+   1584 → 1567 来回跳；`overflow-y: scroll` 是唯一稳的写法（实测短内容下也是 1567）。
+   代价是极短内容时右下会露出一条空滚动条轨道，而首页信息流永远比一屏高，看不到。
+
+   **只挂首页（1.2.1）**：以前这条跟着 `bili-elite-home-only` 走，而那个类是全站挂的 ——
+   搜索页于是变成「html 一条 + body 自己一条」两根滚动条并排（body 在搜索页是
+   `overflow-y: scroll` 的自滚动容器）。去掉 html 这条，body 那根就回到窗口最右边。
+   类 `bili-elite-home-scroll` 由 topbarOptimize.ts 在「首页 + 首页优化开着」时挂
+   （按 location 判定，首帧就位，不靠 `:has()` 等 feed 出现）。 */
+html.bili-elite-home-only.bili-elite-home-scroll {
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+}
+
+/* 只命中「包着首页 feed 的那个」匿名 div，不影响其它页面的布局 */
+html.bili-elite-home-only body > div:has(> .bili-feed4) {
+  max-width: none !important;
+}
+
+html.bili-elite-home-only main.bili-feed4-layout {
+  max-width: none !important;
+  padding-left: var(--bili-home-gutter) !important;
+  padding-right: var(--bili-home-gutter) !important;
+}
+
+html.bili-elite-home-only .container.is-version8 {
+  grid-template-columns: repeat(auto-fill, minmax(var(--bili-home-card, 350px), 1fr)) !important;
+}

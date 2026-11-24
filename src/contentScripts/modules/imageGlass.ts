@@ -1,12 +1,11 @@
 import { get, onConfigChange } from '../config'
 import { EventBag } from '../eventBag'
 import { getGlassParams, onGlassParamsChange } from './glassConfig'
-import { IMAGE_DUR_CLOSE, IMAGE_DUR_OPEN } from './imageViewer'
+import { IMAGE_DUR_CLOSE, IMAGE_DUR_OPEN, IMAGE_EASE } from './imageViewer'
 
 const STYLE_ID = 'bili-elite-glass-style'
 const OVERLAY_ID = 'bili-elite-glass-overlay'
 const GLASS_CLASS = 'bili-glass'
-const EASE = 'cubic-bezier(0.25, 0.46, 0.45, 0.94)'
 
 export function setupImageGlass(): () => void {
   const bag = new EventBag()
@@ -81,7 +80,7 @@ export function setupImageGlass(): () => void {
     overlay.style.opacity = String(from)
     overlayAnim = overlay.animate(
       [{ opacity: from }, { opacity: to }],
-      { duration: dur, easing: EASE, fill: 'forwards' },
+      { duration: dur, easing: IMAGE_EASE, fill: 'forwards' },
     )
     overlayTarget = to
     overlayAnim.onfinish = () => {
@@ -156,8 +155,16 @@ export function setupImageGlass(): () => void {
   function scan(root: Node) {
     if (root.nodeType !== 1) return
     const el = root as Element
-    if (el.classList && el.classList.contains('pswp')) bindPswp(el)
-    el.querySelectorAll?.('.pswp').forEach(bindPswp)
+    if (el.classList?.contains('pswp')) {
+      bindPswp(el)
+      return
+    }
+    // getElementsByClassName 不解析选择器，比 querySelectorAll 便宜一个数量级。
+    // 首页滚动时这个回调每批 DOM 变化都要跑（一批几十个新增节点），省下来的
+    // 是实打实的主线程时间；没命中就直接 return，不做任何数组拷贝。
+    const hits = el.getElementsByClassName?.('pswp')
+    if (!hits || hits.length === 0) return
+    for (const p of Array.from(hits)) bindPswp(p)
   }
 
   ensureStyle()

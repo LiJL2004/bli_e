@@ -1,0 +1,74 @@
+/* ===== 设计 token：全站唯一来源 · Google Material 3 风格 ===== */
+:root {
+  --bili-dur-fast: 160ms;
+  --bili-dur-base: 220ms;
+  --bili-dur-slow: 320ms;
+  
+  --bili-ease: cubic-bezier(0.2, 0, 0, 1);
+  --bili-ease-out: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --bili-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  --bili-radius-sm: 8px;
+  --bili-radius-md: 12px;
+  --bili-radius-lg: 16px;
+  --bili-edge: 10px;
+
+  /* Google 品牌色 */
+  --g-blue: #1A73E8;
+  --g-blue-600: #1A73E8;
+  --g-blue-700: #1765CC;
+  --g-blue-container: #D3E3FD;
+  --g-blue-on-container: #041E49;
+  --g-red: #EA4335;
+  --g-yellow: #FBBC05;
+  --g-green: #34A853;
+
+  --g-surface: #FFFFFF;
+  --g-surface-variant: #F8F9FA;
+  --g-surface-2: #F1F3F4;
+  --g-outline: #DADCE0;
+  --g-on-surface: #202124;
+  --g-on-surface-variant: #5F6368;
+
+  /* 状态层 */
+  --g-state-hover: rgba(32, 33, 36, 0.08);
+  --g-state-focus: rgba(32, 33, 36, 0.12);
+  --g-state-press: rgba(32, 33, 36, 0.16);
+  --g-primary-state-hover: rgba(26, 115, 232, 0.08);
+  --g-primary-state-focus: rgba(26, 115, 232, 0.12);
+  --g-primary-state-press: rgba(26, 115, 232, 0.16);
+
+  /* 深色模式 */
+  --g-dark-surface: #202124;
+  --g-dark-surface-variant: #292A2D;
+  --g-dark-surface-2: #3C4043;
+  --g-dark-outline: #5F6368;
+  --g-dark-on-surface: #E8EAED;
+  --g-dark-on-surface-variant: #9AA0A6;
+  --g-dark-primary: #8AB4F8;
+  --g-dark-primary-container: #394457;
+  
+  --g-dark-state-hover: rgba(232, 234, 237, 0.08);
+  --g-dark-state-press: rgba(232, 234, 237, 0.16);
+  --g-dark-primary-state-hover: rgba(138, 180, 248, 0.08);
+  --g-dark-primary-state-press: rgba(138, 180, 248, 0.16);
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none !important;
+  mix-blend-mode: normal;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.bili-elite-home-opt .bili-header .left-entry :is(.home-page-entry, .home-page-panel-entry) a.left-entry__item-trigger:hover {
+    animation: none;
+  }
+  #bili-elite-home-panel {
+    transform: none !important;
+  }
+  html.bili-elite-searchpanel-opt .bili-header .center-search-container .center-search__bar .nav-search-panel.bili-elite-sp-managed,
+  html.bili-elite-searchpanel-opt .bili-header .center-search-container .center-search__bar .nav-search-panel.bili-elite-sp-managed.bili-elite-sp-open {
+    transform: none !important;
+  }
+}

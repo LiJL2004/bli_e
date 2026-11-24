@@ -22,8 +22,8 @@ export type SearchBoxParams = Record<SearchBoxParamKey, number>
 export type SearchBoxParamDef = NumberParamDef<SearchBoxParamKey>
 
 export const SEARCH_BOX_PARAM_DEFS: SearchBoxParamDef[] = [
-  { key: 'blur', label: '搜索框模糊强度', min: 0, max: 60, step: 1, default: 15, fmt: v => `${v}px` },
-  { key: 'tint', label: '搜索框遮罩强度', min: 0, max: 100, step: 1, default: 47, fmt: v => `${v}%` },
+  { key: 'blur', label: '模糊强度', min: 0, max: 60, step: 1, default: 15, fmt: v => `${v}px` },
+  { key: 'tint', label: '遮罩强度', min: 0, max: 100, step: 1, default: 47, fmt: v => `${v}%` },
 ]
 
 export const SEARCH_BOX_STORAGE_KEY = 'bili-elite-searchbox-params'
@@ -53,8 +53,8 @@ export type SearchPanelParams = Record<SearchPanelParamKey, number>
 export type SearchPanelParamDef = NumberParamDef<SearchPanelParamKey>
 
 export const SEARCH_PANEL_PARAM_DEFS: SearchPanelParamDef[] = [
-  { key: 'blur', label: '搜索面板模糊强度', min: 0, max: 60, step: 1, default: 38, fmt: v => `${v}px` },
-  { key: 'tint', label: '搜索面板遮罩强度', min: 0, max: 100, step: 1, default: 61, fmt: v => `${v}%` },
+  { key: 'blur', label: '模糊强度', min: 0, max: 60, step: 1, default: 38, fmt: v => `${v}px` },
+  { key: 'tint', label: '遮罩强度', min: 0, max: 100, step: 1, default: 61, fmt: v => `${v}%` },
 ]
 
 export const SEARCH_PANEL_STORAGE_KEY = 'bili-elite-searchpanel-params'

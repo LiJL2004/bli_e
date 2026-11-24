@@ -1,0 +1,224 @@
+/**
+ * 「CDN 优化」（实验室，默认关）：量一下各台视频 CDN 节点的实际耗时，挑最快的那台，
+ * 交给后台用 declarativeNetRequest 把分片请求重定向过去。
+ *
+ * 为什么这件事值得做：B 站 playurl 只给一台 primary，其余塞在 backupUrl 里「出错才换」，
+ * 而实测同一份内容在不同 `*.bilivideo.com` 之间差 3~8 倍（44ms ~ 375ms，数据见
+ * `shared/cdnScore.ts` 顶部）。也就是说「打开快不快」有一大截是运气 —— 分到哪台就用哪台。
+ *
+ * 怎么量：`*.bilivideo.com` 不带 `Timing-Allow-Origin`，播放中的分片拿不到 `transferSize`，
+ * 被动测速这条路是死的（实测全是 0）。所以只能自己发一条探测请求：
+ * 拿当前视频**真实分片地址的 path + query**，只换主机名，带 `Range: bytes=0-65535`。
+ *
+ * 为什么换主机名是安全的：实测 `*.bilivideo.com` 之间互相接受对方的 path + query（签名不绑
+ * 主机），akamai 那类不带这个域的主机则会 403 —— 所以候选名单只在这个域内取。
+ *
+ * 代价：每支视频探测一次，最多 4 台 × 32KB = 128KB（外加 4 个 1 字节的预热请求），
+ * 且只在「实验室」里默认关闭。
+ */
+
+import { type CdnScores, MIN_PROBE_BYTES, ewma, isCdnHost, readScores, writeScores } from '~/shared/cdnScore'
+import { get, onConfigChange } from '../config'
+import { watchCdnSegments } from './cdnSegments'
+import { isVideoPage } from './videoBeta'
+
+/**
+ * 写死一批「全国都在用」的镜像主机。地区专属的那种（`cn-lndl-ct-01-03` 之类）写死没意义，
+ * 只能从「这台机器实际用到过的主机」里来 —— 所以候选 = 这份名单 + 分数表里已有的 + 当前正在用的。
+ */
+const BUILTIN_HOSTS = [
+  'upos-sz-mirrorcos.bilivideo.com',
+  'upos-sz-mirrorbd.bilivideo.com',
+  'upos-sz-mirrorhw.bilivideo.com',
+  'upos-sz-mirrorali.bilivideo.com',
+  'upos-sz-estgcos.bilivideo.com',
+]
+
+/** 一次最多探几台（串行，32KB 一台） */
+const PROBE_MAX = 4
+/** 探测取多少字节：够量出速度，又不至于跟正在播的分片抢带宽 */
+const PROBE_BYTES = 32 * 1024
+/** 单台超时 */
+const PROBE_TIMEOUT = 3000
+/** 同一页最短隔多久再探（SPA 换视频会重进，别每支都探） */
+const PROBE_GAP = 5 * 60 * 1000
+
+let lastProbeAt = 0
+
+interface ProbeResult {
+  host: string
+  /** 首字节时间（ms）—— 选节点就看这个 */
+  ms: number
+  mbps: number
+  bytes: number
+}
+
+/**
+ * 用真实分片地址的 path + query 去探另一台主机；拿不满字节就当这台不可用。
+ *
+ * `fetch` 在**响应头到达**时就 resolve，所以「resolve 时刻」就是首字节时间（含一次
+ * CORS 预检 —— 带 Range 不是简单请求；预检结果按 `Access-Control-Max-Age: 21600` 缓存
+ * 6 小时，同一台主机后续再探就只有一次往返了）。之后读 body 的那一段用来算速度。
+ *
+ * `warm = true` 时只取 1 个字节，**只为把连接建起来**（DNS + TCP + TLS）—— 见 probeAll
+ * 里为什么必须分两轮。返回 null。
+ *
+ * **串行探**，不并行：并行时几条请求抢同一条带宽，测出来的全是「被平均」的数，
+ * 节点之间的差异反而被抹平（实测并行时 5 台全落在 146~147ms，串行才拉得开）。
+ */
+async function probeHost(host: string, samplePathQuery: string, warm = false): Promise<ProbeResult | null> {
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), PROBE_TIMEOUT)
+  const t0 = performance.now()
+  try {
+    const res = await fetch(`https://${host}${samplePathQuery}`, {
+      headers: { Range: warm ? 'bytes=0-0' : `bytes=0-${PROBE_BYTES - 1}` },
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+    const ttfb = performance.now() - t0
+    if (!res.ok)
+      return null
+    const buf = await res.arrayBuffer()
+    // 预热轮只关心「连接建起来了没有」，body 读完让连接回到池子里就算成功
+    if (warm)
+      return null
+    const total = performance.now() - t0
+    if (buf.byteLength < MIN_PROBE_BYTES)
+      return null
+    // 速度只算「传输那一段」，别把首字节的等待算进去
+    const transferMs = Math.max(total - ttfb, 1)
+    return {
+      host,
+      ms: Math.round(ttfb),
+      mbps: Math.round((buf.byteLength * 8) / (transferMs / 1000) / 1e4) / 100,
+      bytes: buf.byteLength,
+    }
+  }
+  catch {
+    return null
+  }
+  finally {
+    window.clearTimeout(timer)
+  }
+}
+
+async function probeAll(sampleUrl: string) {
+  let pathQuery = ''
+  try {
+    const u = new URL(sampleUrl)
+    pathQuery = u.pathname + u.search
+  }
+  catch {
+    return
+  }
+  if (!pathQuery || pathQuery.length < 20)
+    return
+
+  const known = await readScores()
+  let current = ''
+  try {
+    current = new URL(sampleUrl).hostname
+  }
+  catch {}
+  // 顺序有讲究：**当前正在用的那台必须排第一**。它是「基准」——没有它就判断不出值不值得切；
+  // 而下面要按 PROBE_MAX 截断，排在后面的会被直接砍掉。
+  const hosts = [...new Set([current, ...Object.keys(known), ...BUILTIN_HOSTS])]
+    .filter(h => isCdnHost(h))
+    .slice(0, PROBE_MAX)
+
+  const results: ProbeResult[] = []
+  // 必须分两轮，否则比出来永远是「当前这台最快」：
+  // 播放器正在用的那台连接是热的（TCP + TLS 早就建好了），其余几台是冷的，光握手就要
+  // 100~150ms —— 实测第一轮里当前主机 12ms、其他 146~442ms，差距一大半是握手而不是节点。
+  // 第一轮只取 1 个字节把每台的连接建起来（顺带把 CORS 预检缓存掉），第二轮才是公平比较。
+  for (const host of hosts) {
+    await probeHost(host, pathQuery, true)
+  }
+  // 串行：并行会把带宽摊平，节点差异反而测不出来（见 probeHost 的注释）
+  for (const host of hosts) {
+    const r = await probeHost(host, pathQuery)
+    if (r)
+      results.push(r)
+  }
+  if (!results.length)
+    return
+
+  // 合并进分数表：首字节时间用 EWMA（0.6 偏向新值，节点状态变得快），速度按这次实测重算
+  const next: CdnScores = { ...known }
+  for (const r of results) {
+    const prev = next[r.host]
+    next[r.host] = {
+      ms: Math.round(ewma(prev?.ms || 0, r.ms, 0.6)),
+      mbps: r.mbps,
+      bytes: r.bytes,
+      ts: Date.now(),
+    }
+  }
+  await writeScores(next)
+
+  // 留在 <html> 上，方便 F12 里直接看这次探到什么（后台装没装规则也在这里体现）
+  try {
+    const line = results
+      .sort((a, b) => a.ms - b.ms)
+      .map(r => `${r.host.replace('.bilivideo.com', '')}:${Math.round(r.ms)}ms`)
+      .join(' ')
+    document.documentElement.setAttribute('data-blie-cdn', line)
+  }
+  catch {}
+}
+
+function startProbing(): () => void {
+  let done = false
+  let timer = 0
+
+  const stop = watchCdnSegments(({ url }) => {
+    if (done)
+      return
+    done = true
+    // 等 4 秒再探：起播那几秒是缓冲最紧张的时候，别去抢带宽（探测总共约 1 秒、128KB）
+    timer = window.setTimeout(() => {
+      if (Date.now() - lastProbeAt < PROBE_GAP)
+        return
+      lastProbeAt = Date.now()
+      probeAll(url).catch(() => {})
+    }, 4000)
+  })
+
+  return () => {
+    window.clearTimeout(timer)
+    stop()
+  }
+}
+
+export function setupCdnOptimize(): () => void {
+  if (!isVideoPage())
+    return () => {}
+
+  let stop: (() => void) | null = null
+  const start = () => {
+    if (!stop)
+      stop = startProbing()
+  }
+  const halt = () => {
+    stop?.()
+    stop = null
+  }
+
+  if (get('cdnOptimize'))
+    start()
+
+  const off = onConfigChange((key) => {
+    if (key !== 'cdnOptimize')
+      return
+    if (get('cdnOptimize'))
+      start()
+    else
+      halt()
+  })
+
+  return () => {
+    off()
+    halt()
+  }
+}

@@ -1,0 +1,268 @@
+/**
+ * 网络预热：把「几百毫秒之后才会用到」的那几条连接提前建好（DNS / TCP / TLS）。
+ *
+ * 为什么要做 —— 2026-11-08 在真实 Chrome（1600×900、登录态、暖缓存）里量到的首屏请求时间线：
+ *
+ *   首页：s1.hdslb.com 541ms → i0.hdslb.com 542ms → api.bilibili.com 684ms → passport 985ms
+ *   播放页：s1 550 → i0 591 → cn-lndl-ct-01-01.bilivideo.com 810 → api 855
+ *
+ * 两类域名要分开看：
+ *
+ *   · `s1` / `i0` 是 HTML 里就写着的 `<link>` / `<img>`，浏览器的 preload scanner 在字节
+ *     到达的同一刻就开始连了 —— 我们再 preconnect 只会排在它后面，一个毫秒都省不下来。
+ *     所以这两个**什么都不做**（也不做 dns-prefetch，那是同一份 DNS 查询再做一遍）。
+ *   · `api.bilibili.com` / 视频 CDN **不在 HTML 里**，是 B 站自己的脚本跑起来之后才发出的
+ *     第一条请求。冷缓存下这一条要现做 DNS + TCP + TLS（TLS1.3 也是 1 个 RTT）。
+ *
+ * 三条规则：
+ *
+ *   1. `api.bilibili.com` 每个页面都 preconnect。它是整站所有接口共用的一个 origin
+ *      （实测首页 17 条、播放页 23 条请求全在这一个域名上），一条连接就够。
+ *   2. 播放页额外 preconnect「上次实际用到的视频 CDN 主机」。这个主机名是按地区 + 运营商
+ *      分配的（本机实测是 `cn-lndl-ct-01-01.bilivideo.com`），写死一份列表没有意义 ——
+ *      只能自己记：播放页起播之后从 `performance` 里认出 `*.bilivideo.com` 的主机，
+ *      存进 storage.local，下次打开播放页时直接预热。换网络 / 换地区后第一次会打偏，
+ *      代价只是多开一条没人用的连接，第二次就自己纠正过来了。
+ *   3. 其余「1~2 秒后才用到」的域名只做 `dns-prefetch`：只发一个 DNS 查询、不占连接。
+ *
+ * 为什么**不带** `crossorigin`：B 站的 XHR 全是 `withCredentials`（credentials 模式
+ * include）。`<link rel=preconnect>` 不带 crossorigin 时建的正是 include 那一档连接，
+ * 而 include 档的连接可以服务 omit 档的请求、反过来不行 —— 不带是超集，带反而会漏。
+ *
+ * ## 实测：这条提示在当前 Chromium 上没有被复用（别把它当「秒开」卖）
+ *
+ * chromium 123 探针，冷 profile，同一份产物只切「注入 / 不注入」，播放页各 5 轮，
+ * 用 CDP `Network.responseReceived.timing` 判连接复用（`connectStart = -1` 才是复用；
+ * 这个判据先用「同主机连发三次图片」校准过，第 2、3 次确实是 -1）：
+ *
+ *   | | 第一条 api 请求 connect/TLS | 复用 |
+ *   | --- | --- | --- |
+ *   | 不注入 | 12/46 16/50 1/34 3/36 1/36 | 0/5 |
+ *   | 注入 preconnect | 1/34 1/36 1/33 12/45 0/34 | 0/5 |
+ *
+ * 也就是说 Chromium 确实处理了这条提示（`<link>` 处理完会从 DOM 里消失），但那条连接
+ * 没有交到页面自己的请求手上 —— TLS 那 30~50ms 一分没省。试过放进 `<head>` / 放进
+ * `<html>` / 等 load 之后再插、带不带 `crossorigin`、走不走代理，全都不复用；
+ * 换成 `preload as=fetch`（真发一条请求）才会偶尔出现 `connectStart = -1`，
+ * 但那要多打一条 `nav` 接口，30ms 不值这个代价。
+ *
+ * 所以这里保留的是**代价为零、且不依赖连接复用**的那部分：`dns-prefetch`（只发 DNS 查询）
+ * 与「记住 CDN 主机」。preconnect 仍然留着 —— 换 Chrome 版本 / 换机器可能就生效，
+ * 失效时的代价只是多一条闲置连接。真正的「点开就出来」早就由 `hoverPrefetch.ts`
+ * （`rel=prefetch as=document`，实测 TTFB 380ms → 1ms）做掉了，别指望这一层。
+ */
+
+import { get } from '../config'
+import { isVideoPage } from './videoBeta'
+
+/** 记「上次实际用到的视频 CDN 主机」的 key（storage.local，不走 sync：换设备后主机名会变） */
+const CDN_KEY = 'bili-elite-vcdn'
+/**
+ * 最多记两台。实测 B 站每次 playurl 会在几台之间换（`upos-sz-mirrorbd` / `mirrorcos` /
+ * `estgcos` / `cn-lndl-ct-01-03` 都见过），记两台是「命中率」与「闲置连接数」的折中 ——
+ * 记满一台命中率太低，记四台就要多开两条没人用的连接。
+ */
+const CDN_MAX = 2
+/** 记忆的有效期：超过这个时间就当它过期了（换城市 / 换运营商后主机名会变） */
+const CDN_TTL = 30 * 24 * 3600 * 1000
+
+/** 只认 `*.bilivideo.com`：akamai 那类主机的签名绑自己，预热了也用不上 */
+const CDN_HOST_RE = /^[a-z0-9-]+\.bilivideo\.com$/
+
+/**
+ * 1~2 秒后才用到、又不在 HTML 里的域名。只做 DNS。
+ * 名单来自上面那条实测时间线，不是「B 站可能用到的所有域名」——
+ * 多写一个没被用到的域名就是白发一次查询。
+ */
+const DNS_HOSTS = [
+  'https://passport.bilibili.com',
+  'https://api.live.bilibili.com',
+  'https://api.vc.bilibili.com',
+  'https://message.bilibili.com',
+  'https://interface.bilibili.com',
+]
+
+/** 每个页面都值得开一条连接的那个 origin（所有接口共用） */
+const API_HOST = 'https://api.bilibili.com'
+
+/**
+ * 已经发出去的提示，写成 `<html data-blie-net>` 上的一串标记，形如
+ * `p:api.bilibili.com d:passport.bilibili.com`（p = preconnect，d = dns-prefetch）。
+ *
+ * 为什么要留这个：Chrome 处理完一条 preconnect 会**把 `<link>` 从 DOM 里摘掉**，
+ * 于是「注入成功」和「压根没注入」在 F12 里长得一模一样 —— 播放页那条「上次用到的
+ * 视频 CDN 主机」是异步读 storage 之后才发的，最容易让人怀疑它没生效。
+ * 有这个属性就能直接看一眼，也方便以后排查「到底预热了哪些域名」。
+ * 写属性只在 document_start 附近发生（那时整棵树还没几个节点），开销可以忽略。
+ *
+ * 但**不能一条一写**：给 `<html>` 写属性会让整棵树样式失效（本仓库别处踩过，3293 个
+ * 元素一次 10.5ms）。这里一页要发 6~7 条，所以攒到当前这批发完、微任务里只写一次。
+ */
+const injected: string[] = []
+let markQueued = false
+
+function markInjected() {
+  if (markQueued)
+    return
+  markQueued = true
+  queueMicrotask(() => {
+    markQueued = false
+    try {
+      document.documentElement.setAttribute('data-blie-net', injected.join(' '))
+    }
+    catch {}
+  })
+}
+
+function addHint(rel: 'preconnect' | 'dns-prefetch', href: string) {
+  const link = document.createElement('link')
+  link.rel = rel
+  link.href = href
+  // document_start 时 <head> 可能还没建出来（解析器还没走到），先挂到 <html> 下 ——
+  // 资源提示只要在文档里就会被处理，位置无所谓；等 head 出来也不再搬，省一次重排。
+  const parent = document.head || document.documentElement
+  if (!parent)
+    return
+  parent.appendChild(link)
+  injected.push(`${rel === 'preconnect' ? 'p' : 'd'}:${href.replace(/^https:\/\//, '')}`)
+  markInjected()
+}
+
+function hasStorage(): boolean {
+  return typeof chrome !== 'undefined' && !!chrome.storage?.local
+}
+
+function readCdnHosts(cb: (hosts: string[]) => void) {
+  if (!hasStorage()) {
+    cb([])
+    return
+  }
+  try {
+    chrome.storage.local.get(CDN_KEY, (raw) => {
+      const v = raw?.[CDN_KEY]
+      if (!v || !Array.isArray(v.hosts) || typeof v.ts !== 'number' || Date.now() - v.ts > CDN_TTL) {
+        cb([])
+        return
+      }
+      cb(v.hosts.filter(h => typeof h === 'string' && /(^|\.)bilivideo\.com$/.test(h)))
+    })
+  }
+  catch {
+    cb([])
+  }
+}
+
+/**
+ * 盯住播放页真正下载的视频分片（`*.bilivideo.com`），每发现**一台新的主机**就回调一次。
+ *
+ * 为什么用 `PerformanceObserver` + `buffered: true` 而不是 `getEntriesByType`：资源条目默认
+ * 只留 250 条，播放页光分片就几百条，等想起来去读的时候早被挤出去了；`buffered` 还能把
+ * 「观察器挂上之前就已经发生」的那几条补回来。
+ *
+ * 按主机去重：分片一秒好几条，不去重的话回调会被刷爆，而这里只关心「有哪几台」。
+ */
+function watchCdnSegments(cb: (host: string) => void): () => void {
+  const seen = new Set<string>()
+  let observer: PerformanceObserver | null = null
+  try {
+    observer = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        // 先用最便宜的字符串判断挡掉绝大部分条目：播放页一页几百个资源，
+        // 每个都 `new URL()` 是白花（这条回调挂在整页生命周期上）
+        if (entry.name.indexOf('bilivideo.com') < 0)
+          continue
+        let host = ''
+        try {
+          host = new URL(entry.name).hostname
+        }
+        catch {
+          continue
+        }
+        if (!CDN_HOST_RE.test(host) || seen.has(host))
+          continue
+        seen.add(host)
+        try {
+          cb(host)
+        }
+        catch {}
+      }
+    })
+    observer.observe({ type: 'resource', buffered: true })
+  }
+  catch {
+    return () => {}
+  }
+  return () => {
+    observer?.disconnect()
+    observer = null
+  }
+}
+
+/**
+ * 播放页起播之后，把这次真正用到的那几台视频 CDN 主机记下来，供下次预热。
+ *
+ * 写盘时机是「发现一台新主机之后 3 秒」，不是「起播后固定 8 秒写一次」——
+ * 后者有两个毛病：一是 B 站站内跳转是 SPA，文档不重新加载、`setupNetHints` 不会重跑，
+ * 第二个视频的主机就永远记不下来；二是用户看两秒就关掉时那一次写根本不会发生。
+ * 现在按「主机集合变了」触发，SPA 换视频会自然产生新主机 → 自然再写一次；
+ * 主机集合本身很小（一页 1~2 台），所以写盘次数仍然只有个位数。
+ */
+function learnCdnHost(): () => void {
+  if (!isVideoPage() || !hasStorage())
+    return () => {}
+
+  /** 按发现顺序记；去重由 `watchCdnSegments` 做，这里只防极端情况下无限增长 */
+  const hosts: string[] = []
+  let timer = 0
+
+  function flush() {
+    timer = 0
+    if (!hosts.length)
+      return
+    try {
+      chrome.storage.local.set({ [CDN_KEY]: { hosts: hosts.slice(-CDN_MAX), ts: Date.now() } })
+    }
+    catch {}
+  }
+
+  const stop = watchCdnSegments((host) => {
+    if (hosts.includes(host))
+      return
+    hosts.push(host)
+    if (hosts.length > CDN_MAX * 4)
+      hosts.splice(0, hosts.length - CDN_MAX * 4)
+    window.clearTimeout(timer)
+    timer = window.setTimeout(flush, 3000)
+  })
+
+  // 关标签页时兜一次：上面那个 3 秒防抖可能还没到
+  window.addEventListener('pagehide', flush)
+
+  return () => {
+    window.clearTimeout(timer)
+    window.removeEventListener('pagehide', flush)
+    stop()
+  }
+}
+
+export function setupNetHints(): () => void {
+  // 关掉就一个字节都不发（开关在设置面板「界面优化」里；改了下次打开页面生效 ——
+  // 提示已经进浏览器连接池了，这一页里收不回来）
+  if (!get('netHint'))
+    return () => {}
+
+  addHint('preconnect', API_HOST)
+  for (const host of DNS_HOSTS) addHint('dns-prefetch', host)
+
+  // 视频 CDN 的主机名要异步读出来（storage），比上面几条晚几毫秒 —— 但它在时间轴上
+  // 出现在 800ms 之后，这点延迟无所谓
+  if (isVideoPage()) {
+    readCdnHosts((hosts) => {
+      if (!get('netHint'))
+        return
+      for (const host of hosts) addHint('preconnect', `https://${host}`)
+    })
+  }
+
+  return learnCdnHost()
+}

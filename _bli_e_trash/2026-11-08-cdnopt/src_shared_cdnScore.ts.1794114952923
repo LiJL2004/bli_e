@@ -1,0 +1,133 @@
+/**
+ * 「CDN 优化」的打分表。内容脚本实测写入，后台读它决定要不要把分片重定向到更快的节点。
+ *
+ * 为什么值得做（2026-11-08 实测：同一个 m4s 的 path + query，只换主机名，curl 带 Range）：
+ *
+ *   cn-lndl-ct-01-03   44ms      upos-sz-mirrorbd   230ms
+ *   cn-lndl-ct-01-01  212ms      upos-sz-estgcos    275ms
+ *                                upos-sz-mirrorcos  375ms
+ *
+ * 同一份内容、同一时刻，**节点之间差 3~8 倍**。B 站 playurl 只给一台 primary，其余塞在
+ * backupUrl 里「出错才换」—— 默认情况下你会一直用分给你的那台，好不好看运气。
+ *
+ * 换节点之所以安全：实测 `*.bilivideo.com` 之间**互相接受对方的 path + query**（签名不绑
+ * 主机），响应头也一致（`Access-Control-Allow-Origin: https://www.bilibili.com`）——
+ * 所以把请求重定向到同域的另一台，播放器完全无感（见 `background/cdnOptimize.ts`）。
+ *
+ * 存 storage.local：节点按地区 + 运营商分配，换设备不该继承。一台一条：
+ *   ms     探测一次的总耗时（ms，EWMA）—— 决定「选谁」
+ *   mbps   这次探测顺带算出来的速度（Mbps，EWMA）—— 只作参考与展示
+ *   bytes  探测实际拿到的字节数 —— 太少说明这台不靠谱，不参与排序
+ *   ts     最近更新时间（过期的直接丢）
+ *
+ * 注意这里**没有**「播放中被动测速」：`*.bilivideo.com` 的响应不带 `Timing-Allow-Origin`，
+ * 跨域拿到的 `transferSize` / `encodedBodySize` 全是 0（实测），算不出真实速度。
+ * 所以速度只能靠我们自己发一条带 Range 的探测请求来量。
+ */
+
+export const CDN_SCORE_KEY = 'bili-elite-cdn-score'
+
+/** 探测一次要拿到多少字节才算「这台可用」（拿不满就当它失败） */
+export const MIN_PROBE_BYTES = 32 * 1024
+
+/** 分数多久算过期（换城市 / 换运营商后旧分数就是错的） */
+export const SCORE_TTL = 7 * 24 * 3600 * 1000
+
+/** 最多留几台（按耗时排序留最快的，免得表无限长） */
+export const SCORE_MAX_HOSTS = 6
+
+export interface HostScore {
+  ms: number
+  mbps: number
+  bytes: number
+  ts: number
+}
+
+export type CdnScores = Record<string, HostScore>
+
+/** 只认 `*.bilivideo.com`：akamai 那些主机的签名绑自己，换过去会 403（实测） */
+export function isCdnHost(host: string): boolean {
+  return /^[a-z0-9-]+\.bilivideo\.com$/.test(host)
+}
+
+function getLocal<T>(key: string): Promise<T | undefined> {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.get(key, (raw: any) => resolve(raw?.[key] as T | undefined))
+    }
+    catch {
+      resolve(undefined)
+    }
+  })
+}
+
+function setLocal(key: string, value: unknown): Promise<void> {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.set({ [key]: value }, () => resolve())
+    }
+    catch {
+      resolve()
+    }
+  })
+}
+
+/** 读回来顺手清掉过期 / 非法域名 / 拿不满字节的条目，调用方拿到的永远是可用的表 */
+export function sanitize(scores: CdnScores | undefined): CdnScores {
+  const now = Date.now()
+  const out: CdnScores = {}
+  for (const [host, s] of Object.entries(scores || {})) {
+    if (!isCdnHost(host) || !s || typeof s.ts !== 'number' || now - s.ts > SCORE_TTL)
+      continue
+    if (!(Number(s.ms) > 0) || Number(s.bytes) < MIN_PROBE_BYTES)
+      continue
+    out[host] = {
+      ms: Number(s.ms),
+      mbps: Number(s.mbps) || 0,
+      bytes: Number(s.bytes),
+      ts: s.ts,
+    }
+  }
+  return out
+}
+
+export async function readScores(): Promise<CdnScores> {
+  return sanitize(await getLocal<CdnScores>(CDN_SCORE_KEY))
+}
+
+/** 写回前裁剪：过期 / 非法 / 样本不足的丢掉，按耗时留前 SCORE_MAX_HOSTS 台 */
+export async function writeScores(scores: CdnScores): Promise<void> {
+  const clean = sanitize(scores)
+  const kept = Object.entries(clean)
+    .sort((a, b) => a[1].ms - b[1].ms)
+    .slice(0, SCORE_MAX_HOSTS)
+  await setLocal(CDN_SCORE_KEY, Object.fromEntries(kept))
+}
+
+/** 指数滑动平均：新样本权重 `w`；没有旧值时直接取新值 */
+export function ewma(prev: number, next: number, w: number): number {
+  if (!prev || !Number.isFinite(prev))
+    return next
+  return prev * (1 - w) + next * w
+}
+
+/**
+ * 挑一台「值得切过去」的主机。返回空串 = 不装重定向规则。
+ *
+ * 三个条件，缺一不切：
+ *   · 至少两台有分数（只有一台等于没得选）；
+ *   · 最快的要比第二快**至少快 25%** —— 差一点点就来回切，每切一次都要重新握手；
+ *   · 最快的那台自己得有像样的速度（< 0.3 Mbps 说明探测快、拉数据不行）。
+ */
+export function pickBest(scores: CdnScores): string {
+  const rows = Object.entries(scores).sort((a, b) => a[1].ms - b[1].ms)
+  if (rows.length < 2)
+    return ''
+  const [bestHost, best] = rows[0]
+  const second = rows[1][1]
+  if (best.ms > second.ms * 0.75)
+    return ''
+  if (best.mbps > 0 && best.mbps < 0.3)
+    return ''
+  return bestHost
+}

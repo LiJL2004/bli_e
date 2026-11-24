@@ -1,0 +1,48 @@
+/*
+ * 实验室 · 材质开关过渡（夜间模式的配色在 night.css，设置面板内的在 panel.css）
+ */
+
+/* ===== 1. 材质开关过渡 ===== */
+/* 顶栏的底色由 .bili-header__bar 自己画，毛玻璃挂在它的 ::before 上。
+   background-color 能补间，backdrop-filter 不能 —— 所以让 ::before 常驻，
+   用 opacity 0→1 模拟「玻璃慢慢浮上来」，同时 bar 自己的白底淡出（background
+   从 #fff 过渡到 transparent）。两个过渡叠加起来就是一次交叉淡入。
+   ::before 只在开着这个开关时才存在（其余时候连伪元素都没有，零开销）。 */
+html.bili-elite-material-fade body .bili-header .bili-header__bar {
+  /* topbar.css §1 写死了 transition:none（禁掉 B 站自己的滑入动画），这里要顶掉 */
+  transition: background-color var(--bili-dur-base) var(--bili-ease), box-shadow var(--bili-dur-base) var(--bili-ease) !important;
+}
+html.bili-elite-material-fade body .bili-header .bili-header__bar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  box-sizing: border-box;
+  border-radius: inherit;
+  pointer-events: none;
+  background-color: rgba(255, 255, 255, var(--bili-topbar-tint, 0.62));
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, calc(var(--bili-topbar-tint, 0.62) * 0.22)) 0%, rgba(255, 255, 255, 0) 62%);
+  -webkit-backdrop-filter: blur(var(--bili-topbar-blur, 24px)) saturate(190%) brightness(1.08);
+  backdrop-filter: blur(var(--bili-topbar-blur, 24px)) saturate(190%) brightness(1.08);
+  border-bottom: 0.5px solid rgba(0, 0, 0, calc(var(--bili-topbar-tint, 0.62) * 0.1));
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, calc(var(--bili-topbar-tint, 0.62) * 1.2));
+  /* visibility 一起切：不可见时不参与合成，也就不必为那层 blur 付任何代价 */
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--bili-dur-base) var(--bili-ease), visibility 0s linear var(--bili-dur-base);
+}
+html.bili-elite-glass.bili-elite-material-fade body .bili-header .bili-header__bar::before {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity var(--bili-dur-base) var(--bili-ease), visibility 0s;
+}
+
+/* 其余几块材质面（搜索框 / 搜索面板 / 顶栏浮层）没有独立的分层可借，
+   直接让底色和描边补间 —— 遮罩强度本来就是个颜色，淡入淡出的观感已经够了，
+   没必要为它们各加一层 backdrop-filter 叠层（那层本身就要多算一次模糊）。 */
+html.bili-elite-material-fade .center-search__bar #nav-searchform,
+html.bili-elite-material-fade .bili-header .search-panel,
+html.bili-elite-material-fade #bili-elite-home-panel .bili-elite-panel-card,
+html.bili-elite-material-fade .bili-header .v-popover .v-popover-content {
+  transition: background-color var(--bili-dur-base) var(--bili-ease), border-color var(--bili-dur-base) var(--bili-ease), box-shadow var(--bili-dur-base) var(--bili-ease);
+}

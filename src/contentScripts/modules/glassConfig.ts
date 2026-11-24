@@ -22,6 +22,8 @@ export const GLASS_PARAM_DEFS: GlassParamDef[] = [
     step: 2,
     default: 44,
     fmt: v => (v < 50 ? `偏暗 ${50 - v}` : v > 50 ? `偏亮 ${v - 50}` : '适中'),
+    // 胶囊上显示的是「偏暗 6」这种偏离量，点开输入框也应该是 6（而不是原始值 44）
+    edit: { to: v => v - 50, from: n => n + 50 },
   },
 ]
 

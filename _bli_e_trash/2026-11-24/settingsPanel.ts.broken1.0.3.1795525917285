@@ -1,0 +1,857 @@
+import type { FeatureKey } from '~/shared/features'
+import type { NumberParamDef } from './paramStore'
+import { DEFAULT_CONFIG, groupFeatures } from '~/shared/features'
+import { getAll, onConfigChange, persist } from '../config'
+import { LAYER_SETTINGS, bindLayerToWebFullscreen } from './videoLayer'
+import {
+  GLASS_PARAM_DEFS,
+  getGlassParams,
+  onGlassParamsChange,
+  resetGlassParams,
+  setGlassParam,
+  type GlassParamKey,
+} from './glassConfig'
+import {
+  HOME_CARD_PARAM_DEFS,
+  getHomeCardParams,
+  onHomeCardParamsChange,
+  resetHomeCardParams,
+  setHomeCardParam,
+  type HomeCardParamKey,
+} from './homeCardConfig'
+import {
+  HOME_PANEL_PARAM_DEFS,
+  getHomePanelParams,
+  onHomePanelParamsChange,
+  resetHomePanelParams,
+  setHomePanelParam,
+  type HomePanelParamKey,
+} from './homePanelConfig'
+import {
+  PANEL_PARAM_DEFS,
+  getPanelParams,
+  onPanelParamsChange,
+  resetPanelParams,
+  setPanelParam,
+  type PanelParamKey,
+} from './panelConfig'
+import {
+  PANEL_SCALE_PARAM_DEFS,
+  SCALE_BASE,
+  getPanelScale,
+  onPanelScaleChange,
+  resetPanelScale,
+  setPanelScale,
+} from './panelScaleConfig'
+import {
+  PRELOAD_PARAM_DEFS,
+  getPreloadParams,
+  onPreloadParamsChange,
+  resetPreloadParams,
+  setPreloadParam,
+  type PreloadParamKey,
+} from './preloadConfig'
+import {
+  SEARCH_BOX_PARAM_DEFS,
+  SEARCH_PANEL_PARAM_DEFS,
+  getSearchBoxParams,
+  getSearchPanelParams,
+  onSearchBoxParamsChange,
+  onSearchPanelParamsChange,
+  resetSearchBoxParams,
+  resetSearchPanelParams,
+  setSearchBoxParam,
+  setSearchPanelParam,
+  type SearchBoxParamKey,
+  type SearchPanelParamKey,
+} from './searchConfig'
+import {
+  TOPBAR_PARAM_DEFS,
+  getTopbarParams,
+  onTopbarParamsChange,
+  resetTopbarParams,
+  setTopbarParam,
+  type TopbarParamKey,
+} from './topbarConfig'
+import panelCss from './panel.css?inline'
+
+/**
+ * 一个「材质」功能对应的数值参数组。
+ * - kind 决定 DOM 里的 data 属性后缀：input[data-<kind>] / span[data-<kind>-val]
+ * - feature 是它所属的功能开关：开关关闭时该组滑块变灰、不可拖动
+ * - afterChange 是参数变化后需要额外执行的动作（如把面板强度写回 CSS 变量）
+ */
+interface ParamGroup {
+  kind: string
+  defs: NumberParamDef<string>[]
+  get: () => Record<string, number>
+  set: (key: string, value: number) => void
+  onChange: (cb: () => void) => () => void
+  feature: FeatureKey
+  afterChange?: () => void
+  /** 该功能卡是否横跨整行（默认只占栅格的一列），如「首页预加载」 */
+  wide?: boolean
+}
+
+interface WiredGroup {
+  feature: FeatureKey
+  inputs: HTMLInputElement[]
+  sync: () => void
+}
+
+/** 面板材质的模糊 / 遮罩写入 CSS 变量（供 panel.css 使用） */
+function applyPanelParams() {
+  const { blur, tint } = getPanelParams()
+  const root = document.documentElement.style
+  root.setProperty('--bili-panel-blur', `${blur}px`)
+  root.setProperty('--bili-panel-tint', `${Math.min(100, Math.max(0, tint)) / 100}`)
+}
+
+/** 「设置面板缩放」写入 CSS 变量（panel.css 用它整体 scale；100% = SCALE_BASE 倍基准） */
+function applyPanelScale() {
+  const { scale } = getPanelScale()
+  document.documentElement.style.setProperty('--bili-panel-scale', String((scale / 100) * SCALE_BASE))
+}
+
+/** 新增一种「材质」时，只需在这里加一项：卡片、滑块、同步、开关联动都会自动生效 */
+const PARAM_GROUPS: ParamGroup[] = [
+  {
+    kind: 'glass',
+    defs: GLASS_PARAM_DEFS,
+    get: getGlassParams,
+    set: (k, v) => setGlassParam(k as GlassParamKey, v),
+    onChange: onGlassParamsChange,
+    feature: 'imageGlass',
+  },
+  {
+    kind: 'topbar',
+    defs: TOPBAR_PARAM_DEFS,
+    get: getTopbarParams,
+    set: (k, v) => setTopbarParam(k as TopbarParamKey, v),
+    onChange: onTopbarParamsChange,
+    feature: 'topbarGlass',
+  },
+  {
+    kind: 'searchbox',
+    defs: SEARCH_BOX_PARAM_DEFS,
+    get: getSearchBoxParams,
+    set: (k, v) => setSearchBoxParam(k as SearchBoxParamKey, v),
+    onChange: onSearchBoxParamsChange,
+    feature: 'searchBoxGlass',
+  },
+  {
+    kind: 'searchpanel',
+    defs: SEARCH_PANEL_PARAM_DEFS,
+    get: getSearchPanelParams,
+    set: (k, v) => setSearchPanelParam(k as SearchPanelParamKey, v),
+    onChange: onSearchPanelParamsChange,
+    feature: 'searchPanelGlass',
+  },
+  {
+    kind: 'homepanel',
+    defs: HOME_PANEL_PARAM_DEFS,
+    get: getHomePanelParams,
+    set: (k, v) => setHomePanelParam(k as HomePanelParamKey, v),
+    onChange: onHomePanelParamsChange,
+    feature: 'homePanelGlass',
+  },
+  {
+    kind: 'panel',
+    defs: PANEL_PARAM_DEFS,
+    get: getPanelParams,
+    set: (k, v) => setPanelParam(k as PanelParamKey, v),
+    onChange: onPanelParamsChange,
+    feature: 'panelGlass',
+    afterChange: applyPanelParams,
+  },
+  {
+    kind: 'preload',
+    defs: PRELOAD_PARAM_DEFS,
+    get: getPreloadParams,
+    set: (k, v) => setPreloadParam(k as PreloadParamKey, v),
+    onChange: onPreloadParamsChange,
+    feature: 'preload',
+    // 这一组里只有它带滑块，独占一列会显得孤零零；横跨整行，与「设置面板缩放」同宽
+    wide: true,
+  },
+  {
+    kind: 'homecard',
+    defs: HOME_CARD_PARAM_DEFS,
+    get: getHomeCardParams,
+    set: (k, v) => setHomeCardParam(k as HomeCardParamKey, v),
+    onChange: onHomeCardParamsChange,
+    feature: 'homeOptimize',
+    // 滑块挂在「首页优化」那张卡里，独占一列太窄，跟预加载一样横跨整行
+    wide: true,
+  },
+]
+
+/**
+ * 「设置面板缩放」滑块挂在哪个分类下（分组名取自 features.ts 的 group）。
+ * 它不是一个功能开关，所以单独渲染、单独接线。
+ */
+const SCALE_GROUP = '界面优化'
+/** 「实验室」：实验性功能，单独一页，页面顶部有一句说明（见 labNoteHtml） */
+const LAB_GROUP = '实验室'
+
+/**
+ * 「开源地址」：面板末尾的静态页，不来自 features.ts（没有开关、没有参数），
+ * 所以导航项与页面都单独拼一段。两个链接都是 <a target="_blank">，
+ * 交给浏览器开新标签 —— 内容脚本里 window.open 容易被弹窗拦截。
+ */
+const ABOUT_GROUP = '开源地址'
+const ABOUT_LINKS = [
+  { label: '开源地址', href: 'https://github.com/LiJL2004/bli_e' },
+  { label: '开源许可证', href: 'https://github.com/LiJL2004/bli_e/blob/main/LICENSE' },
+]
+const SCALE_DEF = PANEL_SCALE_PARAM_DEFS[0]
+
+/**
+ * 左侧分类的线性图标（16×16，描边走 currentColor）。
+ *
+ * 只在「实验室 → 控制面板 beta」打开时显示：没有它的时候分类是纯文字，
+ * 图标一挂上去整列会宽出一截、也会改变行高，所以默认不渲染进布局（display:none）。
+ * 用 data-* 的方式存成字符串而不是 Vue 组件：整个面板是一段 innerHTML，
+ * 这里保持同一套写法，切分类时零开销。
+ */
+const NAV_ICONS: Record<string, string> = {
+  动效增强: '<path d="M8 2.4 9.7 6.3 13.6 8 9.7 9.7 8 13.6 6.3 9.7 2.4 8 6.3 6.3Z"/>',
+  高级材质: '<rect x="2.4" y="2.4" width="6.2" height="6.2" rx="1.6"/><rect x="7.4" y="7.4" width="6.2" height="6.2" rx="1.6"/>',
+  界面优化: '<path d="M2.6 5.2h10.8M2.6 10.8h10.8"/><circle cx="6.2" cy="5.2" r="1.7"/><circle cx="9.8" cy="10.8" r="1.7"/>',
+  个性设置: '<circle cx="8" cy="5.6" r="2.5"/><path d="M3.1 13.3c.9-2.3 2.7-3.5 4.9-3.5s4 1.2 4.9 3.5"/>',
+  实验室: '<path d="M6.3 2.6v4.1L3.2 11.8a1.3 1.3 0 0 0 1.1 2h7.4a1.3 1.3 0 0 0 1.1-2L9.7 6.7V2.6"/><path d="M5.2 2.6h5.6"/>',
+  // GitHub 的 octocat 是实心图形（其它分类都是线性图标）：子路径自己声明 fill / stroke，
+  // 盖掉父级 svg 的 fill:none / stroke:currentColor；24 单位的路径缩到 16
+  开源地址: '<path transform="scale(0.6667)" fill="currentColor" stroke="none" d="M12 .5C5.73.5.5 5.73.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.28-.01-1.02-.02-2-3.2.7-3.88-1.54-3.88-1.54-.52-1.33-1.28-1.68-1.28-1.68-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.23-1.28-5.23-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11.1 11.1 0 0 1 5.8 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.43-2.69 5.41-5.25 5.69.41.36.78 1.06.78 2.14 0 1.55-.01 2.8-.01 3.18 0 .31.21.68.8.56A11.51 11.51 0 0 0 23.5 12C23.5 5.73 18.27.5 12 .5z"/>',
+}
+
+/**
+ * 设置面板底部展示的「开发版本」标记。
+ *
+ * 商店版本号（`package.json` 的 version）只在发版时变，开发期改代码它不动，导致
+ * 「用户装的是哪一次构建」在界面上看不出来。这里单独维护一个开发序号：
+ * 每改一次代码把 v 后面 +1（v001 → v002 …），正式版本号升级时才重置回 v001。
+ * 规则写在 `.opencode/skills/bili-elite/SKILL.md` 的「版本、发布与图标」一节。
+ */
+const DEV_VERSION = '1.0.3 v015'
+
+export function setupSettingsPanel(): () => void {
+  if ((window as any).__biliEliteSettingsInjected__) return () => {}
+  ;(window as any).__biliEliteSettingsInjected__ = true
+
+  const host = document.createElement('div')
+  host.id = 'bili-elite-settings-host'
+  host.style.cssText = [
+    'position:fixed!important',
+    'top:auto!important',
+    'left:auto!important',
+    'bottom:180px!important',
+    'right:24px!important',
+    'width:44px',
+    'height:44px',
+    'pointer-events:auto',
+  ].join(';')
+  ;(document.documentElement || document.body).appendChild(host)
+  // 层级交给 videoLayer：平时压过页面一切，进网页全屏降到播放器下面被视频盖住
+  const offLayer = bindLayerToWebFullscreen(host, LAYER_SETTINGS)
+
+  const shadow = host.attachShadow({ mode: 'open' })
+
+  const groups = groupFeatures()
+  const groupNames = Object.keys(groups)
+
+  const rangeRowHtml = (kind: string, d: NumberParamDef<string>) => {
+    // 可选的滑块说明：用小字写清这个数值代表什么（如「100% ≈ 1 屏」）
+    const hint = d.hint ? `\n        <div class="range-hint">${d.hint}</div>` : ''
+    // 数值本身是 <button>：外观是胶囊，点一下就地输入（见 startValueEdit）
+    return `
+      <div class="item item-range">
+        <div class="range-head">
+          <span class="label">${d.label}</span>
+          <button class="range-val" type="button" data-${kind}-val="${d.key}"></button>
+        </div>
+        <div class="range-wrap">
+          <input type="range" class="range" min="${d.min}" max="${d.max}" step="${d.step}" data-${kind}="${d.key}">
+        </div>${hint}
+      </div>`
+  }
+
+  const toggleRowHtml = (f: { key: string, label: string, under?: string }) => `
+          <div class="item${f.under ? ' is-sub' : ''}"${f.under ? ` data-under="${f.under}"` : ''}>
+            <span class="label">${f.label}</span>
+            <label class="switch">
+              <input type="checkbox" data-key="${f.key}">
+              <div class="track"><div class="thumb"></div></div>
+            </label>
+          </div>`
+
+  // 「实验室」页顶部的一句话：说清这些开关的定位（可能转正 / 可能长住 / 可能删掉）
+  const labNoteHtml = `
+          <div class="lab-note">实验性功能：后续版本可能改为默认开启，也可能长期留在这里，或者被直接移除。</div>`
+
+  // 带滑块的功能 → 该功能的滑块 HTML（决定它是否独占一张卡片）；
+  // 不带滑块的连续功能合并进同一张卡片，横跨整行；
+  // 标记为 wide 的功能卡同样横跨整行（与「设置面板缩放」同宽）
+  const SLIDER_KEYS: Record<string, string> = {}
+  const SLIDER_WIDE: Record<string, boolean> = {}
+  for (const g of PARAM_GROUPS) {
+    SLIDER_KEYS[g.feature] = g.defs.map(d => rangeRowHtml(g.kind, d)).join('')
+    if (g.wide) SLIDER_WIDE[g.feature] = true
+  }
+
+  // 依附于别的功能的开关（FeatureDef.under）：不单独成卡，而是塞进父项那张卡里，
+  // 排在父项那一行下面、滑块上面；父项关掉时整行变灰（见 syncUI 的 applyToggleDeps）
+  const UNDER: Record<string, Array<{ key: string, label: string, under?: string }>> = {}
+  for (const list of Object.values(groups) as Array<Array<{ key: string, label: string, under?: string }>>) {
+    for (const f of list) {
+      if (f.under) (UNDER[f.under] ||= []).push(f)
+    }
+  }
+  const SUB_KEYS = new Set(Object.values(UNDER).flat().map(f => f.key))
+
+  // 「高级材质」页每张卡整行铺满：材质类每一项都是「开关 + 三条滑块」，
+  // 两两并排会把滑块压得太窄，数值也顶不到最右边
+  const STACK_GROUPS = new Set(['高级材质'])
+
+  // 左侧分类按钮：一个分类一个按钮，默认选中第一个。
+  // 图标先渲染进 DOM、默认 display:none —— 「控制面板 beta」只切一个类名就能让它出现，
+  // 不用重建导航（重建会丢掉选中态与正在进行的背景擦除动画）。
+  const navHtml = [...groupNames, ABOUT_GROUP].map((name, i) => `
+        <button class="nav-item${i === 0 ? ' is-active' : ''}" type="button" data-group="${name}">
+          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${NAV_ICONS[name] ?? ''}</svg></span>
+          <span class="nav-text">${name}</span>
+        </button>`).join('')
+
+  // 右侧：一个分类一页，同一时刻只显示选中页
+  const pagesHtml = groupNames.map((groupName, i) => {
+    const blocks: string[] = []
+    let plain = ''
+    const flushPlain = () => {
+      if (plain) {
+        blocks.push(`\n          <div class="setting-block is-plain">${plain}\n          </div>`)
+        plain = ''
+      }
+    }
+    for (const f of groups[groupName] as Array<{ key: string, label: string, cardBreak?: boolean, under?: string, note?: string }>) {
+      if (SUB_KEYS.has(f.key)) continue
+      const sliders = SLIDER_KEYS[f.key]
+      if (sliders) {
+        flushPlain()
+        // 卡片上方那行小字：开关都叫「材质」了，靠它说明这张卡管的是哪一块
+        if (f.note) blocks.push(`\n          <div class="block-note">${f.note}</div>`)
+        // 子开关排在父项那一行下面、滑块上面
+        const subs = (UNDER[f.key] ?? []).map(toggleRowHtml).join('')
+        blocks.push(`\n          <div class="setting-block${SLIDER_WIDE[f.key] ? ' is-wide' : ''}">${toggleRowHtml(f)}${subs}${sliders}\n          </div>`)
+      }
+      else {
+        // cardBreak：在这一项之前断开合并卡片，让它另起一张（见 features.ts 的 FeatureDef）
+        if (f.cardBreak) flushPlain()
+        plain += toggleRowHtml(f)
+      }
+    }
+    flushPlain()
+    // 「界面优化」页末尾追加「设置面板缩放」——它不是一个开关，单独占一张整行卡片
+    if (groupName === SCALE_GROUP) {
+      blocks.push(`\n          <div class="setting-block is-plain">${rangeRowHtml('scale', SCALE_DEF)}\n          </div>`)
+    }
+    // 「实验室」页：顶部先放一句定位说明
+    if (groupName === LAB_GROUP) {
+      blocks.unshift(labNoteHtml)
+    }
+    return `
+        <div class="page${i === 0 ? ' is-active' : ''}${STACK_GROUPS.has(groupName) ? ' is-stack' : ''}" data-page="${groupName}">
+          <div class="group">${blocks.join('')}
+          </div>
+        </div>`
+  }).join('')
+
+  // 「开源地址」页：两行「标签 + 前往」，按钮是 <a>，点开就是 GitHub 新标签
+  const aboutRows = ABOUT_LINKS.map(l => `
+          <div class="item">
+            <span class="label">${l.label}</span>
+            <a class="text-btn" href="${l.href}" target="_blank" rel="noopener noreferrer">前往</a>
+          </div>`).join('')
+  const aboutPageHtml = `
+        <div class="page" data-page="${ABOUT_GROUP}">
+          <div class="group">
+            <div class="block-note">源码与许可证都在 GitHub 上，点「前往」在新标签打开</div>
+            <div class="setting-block is-plain">${aboutRows}
+            </div>
+          </div>
+        </div>`
+  const pagesAll = pagesHtml + aboutPageHtml
+
+  shadow.innerHTML = `
+    <style>${panelCss}</style>
+    <div class="overlay" id="overlay"></div>
+    <div class="panel" id="panel">
+      <div class="panel-head">
+        <div class="title">设置面板</div>
+        <button class="close" id="close" type="button" aria-label="关闭">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+            <path d="M3.7 3.7 12.3 12.3M12.3 3.7 3.7 12.3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+          </svg>
+        </button>
+      </div>
+      <div class="panel-main">
+        <nav class="nav" id="nav">${navHtml}
+        </nav>
+        <div class="panel-body" id="panel-body">${pagesAll}
+        </div>
+      </div>
+      <div class="panel-foot" id="panel-foot">
+        <span class="dev-version">开发版本 ${DEV_VERSION}</span>
+        <button class="text-btn" id="reset-btn-foot" type="button">恢复默认</button>
+      </div>
+    </div>
+    <div class="confirm-mask" id="confirm-mask">
+      <div class="confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-desc">
+        <div class="confirm-title" id="confirm-title">是否恢复默认设置</div>
+        <div class="confirm-desc" id="confirm-desc">所有开关与材质参数都会回到初始状态，此操作不可撤销。</div>
+        <div class="confirm-actions">
+          <button class="confirm-btn" id="confirm-cancel" type="button">取消</button>
+          <button class="confirm-btn is-primary" id="confirm-ok" type="button">确定</button>
+        </div>
+      </div>
+    </div>
+    <div class="btn" id="btn">⚙</div>
+  `
+
+  const overlay = shadow.getElementById('overlay')!
+  const panel = shadow.getElementById('panel')!
+  const panelBody = shadow.getElementById('panel-body')!
+  const btn = shadow.getElementById('btn')!
+  const closeBtn = shadow.getElementById('close')!
+  const resetBtn = shadow.getElementById('reset-btn-foot')!
+  const confirmMask = shadow.getElementById('confirm-mask')!
+  const confirmCancel = shadow.getElementById('confirm-cancel')!
+  const confirmOk = shadow.getElementById('confirm-ok')!
+  const navItems = Array.from(shadow.querySelectorAll<HTMLButtonElement>('.nav-item'))
+  const pages = Array.from(shadow.querySelectorAll<HTMLElement>('.page'))
+  const inputs = shadow.querySelectorAll<HTMLInputElement>('input[data-key]')
+
+  // 卡片级联的序号：每页各自从 0 开始，CSS 用 --i × 18ms 做递增延迟。
+  // 放在这里算一次，切分类时不用重算（每页的卡片数是固定的）。
+  for (const page of pages) {
+    Array.from(page.querySelectorAll<HTMLElement>('.setting-block'))
+      .forEach((el, i) => el.style.setProperty('--i', String(i)))
+  }
+
+  /**
+   * 就地编辑数值。
+   *
+   * 点一下灰字 / 胶囊，就地换成一个数字输入框；回车或失焦提交，Esc 放弃。
+   * 输入框是胶囊的**兄弟节点**而不是子节点：`<button>` 里塞 `<input>` 属于
+   * 「交互元素嵌套」，点进去定位光标时点击会被按钮吃掉。
+   */
+  let editing: { el: HTMLElement, finish: (apply: boolean) => void } | null = null
+
+  function startValueEdit(opts: {
+    el: HTMLElement
+    value: number
+    min: number
+    max: number
+    step: number
+    commit: (v: number) => void
+    restore: () => void
+  }) {
+    if (editing) return
+    const { el, value, min, max, step, commit, restore } = opts
+    const input = document.createElement('input')
+    input.type = 'number'
+    input.className = 'val-input'
+    input.min = String(min)
+    input.max = String(max)
+    input.step = String(step)
+    input.value = String(value)
+    // 就地编辑：**胶囊自己**变成输入框（见 panel.css 的 .range-val.is-editing）——
+    // 底色从浅蓝转白、补一圈蓝描边、文字淡出；输入框是透明底、无描边，只负责把文字
+    // 错开淡进来。两层几何完全重合，所以没有任何位移，也不会看到两个盒子交叉淡入。
+    // 宽度取胶囊的**布局**宽度（offsetWidth）—— 不能用 getBoundingClientRect，
+    // 那个值会被面板的 scale(var(--z)) 一起放大，写进 style.width 就会宽出 z 倍，
+    // 输入框往左探出一截（默认 130% 缩放下差 14px，非常明显）。
+    const w = el.offsetWidth
+    if (w) input.style.width = `${w}px`
+    input.classList.add('is-entering')
+    el.classList.add('is-editing')
+    el.insertAdjacentElement('afterend', input)
+    // 双 rAF：先让浏览器把初始态（透明 + 略大）画出来，下一帧再切到终态才会有过渡
+    requestAnimationFrame(() => requestAnimationFrame(() => input.classList.remove('is-entering')))
+
+    const finish = (apply: boolean) => {
+      if (!editing) return
+      editing = null
+      const v = Number.parseFloat(input.value)
+      // 反向再交叉一次：输入框先淡出，胶囊晚 60ms 再把文字淡回来 ——
+      // 两段文字错开，不会在同一帧叠成两层；淡完再把节点摘掉
+      input.classList.add('is-leaving')
+      window.setTimeout(() => {
+        // 60ms 内可能已经在**另一个**胶囊上开了新编辑，那就别去动它的类；
+        // 只清自己这一颗（否则旧胶囊会一直停在白底 + 透明文字的编辑态）
+        if (editing?.el !== el) el.classList.remove('is-editing')
+      }, 60)
+      window.setTimeout(() => input.remove(), 180)
+      if (apply && Number.isFinite(v)) {
+        commit(v)
+        return
+      }
+      restore()
+    }
+    editing = { el, finish }
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        finish(true)
+      }
+      else if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        finish(false)
+      }
+    })
+    input.addEventListener('blur', () => finish(true))
+    input.focus()
+    // 全选会在第一帧就画出蓝底高亮，跟淡入打架。等淡入过半再选；
+    // 这期间用户要是已经开始敲字，就不选了（否则会把刚敲进去的字全选掉）。
+    const initialValue = input.value
+    window.setTimeout(() => {
+      if (editing && input.isConnected && input.value === initialValue)
+        input.select()
+    }, 120)
+  }
+
+  // 面板尺寸由 panel.css 固定（宽高都是 min(固定值, 视口)），无需 JS 计算
+
+  /** 「设置面板材质」开关：开启时套用毛玻璃，关闭时用不透明卡片 */
+  function applyPanelGlass() {
+    const glass = !!getAll().panelGlass
+    panel.classList.toggle('is-glass', glass)
+    // 确认弹窗与面板是同一种材质，跟着一起切
+    confirmMask.classList.toggle('is-glass', glass)
+  }
+
+  /** 「奶睿设置键」：把右下角的 ⚙ 换成奶睿形象（默认关闭，见 features.ts 的 mascotButton） */
+  function applyMascotButton() {
+    const on = !!getAll().mascotButton
+    btn.classList.toggle('is-mascot', on)
+    if (!on) {
+      btn.style.removeProperty('--bili-mascot-img')
+      return
+    }
+    // 图片在 extension/assets/ 里，manifest 的 web_accessible_resources 必须登记过，
+    // 否则页面上下文加载 chrome-extension:// 资源会被拒
+    const url = typeof chrome !== 'undefined' ? chrome.runtime.getURL?.('assets/panel-mascot.png') : undefined
+    if (url) btn.style.setProperty('--bili-mascot-img', `url("${url}")`)
+  }
+
+  function updateRangeFill(input: HTMLInputElement) {
+    const min = Number.parseFloat(input.min)
+    const max = Number.parseFloat(input.max)
+    const val = Number.parseFloat(input.value)
+    const pct = max > min ? ((val - min) / (max - min)) * 100 : 0
+    // 蓝色填充由 .range-wrap 绘制，变量需要写到它的父级。
+    // 填充宽度是「比例 × (轨道宽 - 滑块) + 滑块 + 留边」，百分比当不了乘数，
+    // 所以给的是 0~1 的无单位比例
+    input.parentElement?.style.setProperty('--pf', `${pct / 100}`)
+  }
+
+  const cleanups: Array<() => void> = [offLayer]
+  const wired: WiredGroup[] = []
+
+  // 统一接线：每个参数组负责自己的滑块渲染、同步与回写
+  for (const g of PARAM_GROUPS) {
+    const gInputs = Array.from(shadow.querySelectorAll<HTMLInputElement>(`input[data-${g.kind}]`))
+    const fmt = (key: string) => {
+      const def = g.defs.find(d => d.key === key)
+      return def ? def.fmt(g.get()[key]) : ''
+    }
+    const valEl = (key: string) => shadow.querySelector(`[data-${g.kind}-val="${key}"]`)
+
+    const sync = () => {
+      const params = g.get()
+      for (const input of gInputs) {
+        const key = input.dataset[g.kind] as string
+        input.value = String(params[key])
+        updateRangeFill(input)
+        const el = valEl(key)
+        if (el) el.textContent = fmt(key)
+      }
+    }
+
+    for (const input of gInputs) {
+      const key = input.dataset[g.kind] as string
+      const handler = () => {
+        g.set(key, Number.parseFloat(input.value))
+        updateRangeFill(input)
+        const el = valEl(key)
+        if (el) el.textContent = fmt(key)
+      }
+      input.addEventListener('input', handler)
+      cleanups.push(() => input.removeEventListener('input', handler))
+    }
+
+    // 数值胶囊：点一下就地编辑。所属开关关掉时那一行是 disabled 状态，不允许改。
+    for (const el of Array.from(shadow.querySelectorAll<HTMLElement>(`[data-${g.kind}-val]`))) {
+      const key = el.dataset[`${g.kind}Val`] as string
+      const onValClick = (e: Event) => {
+        e.stopPropagation()
+        const def = g.defs.find(d => d.key === key)
+        if (!def) return
+        if (el.closest('.item-range')?.classList.contains('is-disabled')) return
+        // 胶囊上显示的可能不是原始值（如「偏暗 6」），edit 负责两边换算，
+        // 保证「点开看到的数字」=「胶囊上那个数字」
+        const ed = def.edit
+        startValueEdit({
+          el,
+          value: ed ? ed.to(g.get()[key]) : g.get()[key],
+          min: ed ? ed.to(def.min) : def.min,
+          max: ed ? ed.to(def.max) : def.max,
+          step: def.step,
+          commit: v => g.set(key, ed ? ed.from(v) : v),
+          // Esc / 非法输入：重新渲染一遍，把胶囊上的文字恢复回来
+          restore: () => syncUI(),
+        })
+      }
+      el.addEventListener('click', onValClick)
+      cleanups.push(() => el.removeEventListener('click', onValClick))
+    }
+
+    cleanups.push(g.onChange(() => {
+      g.afterChange?.()
+      sync()
+    }))
+
+    wired.push({ feature: g.feature, inputs: gInputs, sync })
+  }
+
+  // 左侧分类切换：只切 class，不重建 DOM，也不触发重新布局之外的额外开销
+  function selectGroup(name: string) {
+    for (const item of navItems) {
+      item.classList.toggle('is-active', item.dataset.group === name)
+    }
+    for (const page of pages) {
+      page.classList.toggle('is-active', page.dataset.page === name)
+    }
+    panelBody.scrollTop = 0
+  }
+
+  for (const item of navItems) {
+    const handler = () => selectGroup(item.dataset.group as string)
+    item.addEventListener('click', handler)
+    cleanups.push(() => item.removeEventListener('click', handler))
+  }
+
+  // 所属开关关闭时，对应的滑块变灰且不可拖动
+  function setRangesEnabled(list: HTMLInputElement[], enabled: boolean) {
+    for (const input of list) {
+      input.disabled = !enabled
+      input.closest<HTMLElement>('.item-range')?.classList.toggle('is-disabled', !enabled)
+    }
+  }
+
+  /** 依附于父项的开关（顶栏渐变 ← 顶栏材质）：父项关掉时整行变灰、不可点 */
+  function applyToggleDeps(cfg: Record<string, boolean>) {
+    for (const el of Array.from(shadow.querySelectorAll<HTMLElement>('.item[data-under]'))) {
+      const on = !!cfg[el.dataset.under as string]
+      el.classList.toggle('is-disabled', !on)
+      const box = el.querySelector<HTMLInputElement>('input')
+      if (box) box.disabled = !on
+    }
+  }
+
+  function syncUI() {
+    const cfg = getAll()
+    inputs.forEach((input) => {
+      const key = input.dataset.key as FeatureKey
+      input.checked = !!cfg[key]
+    })
+    for (const g of wired) {
+      g.sync()
+      setRangesEnabled(g.inputs, !!cfg[g.feature])
+    }
+    applyToggleDeps(cfg)
+    applyPanelGlass()
+    applyMascotButton()
+    // 实验室的开关只切面板自己的类名，样式全在 panel.css：
+    //   is-night      夜间模式配色
+    //   is-fade       材质开关过渡
+    //   is-cascade    卡片级联
+    panel.classList.toggle('is-night', !!cfg.nightMode)
+    panel.classList.toggle('is-fade', !!cfg.materialFade)
+    panel.classList.toggle('is-cascade', !!cfg.panelCascade)
+  }
+
+  // 「设置面板缩放」：不属于任何功能开关，单独渲染与接线
+  const scaleInput = shadow.querySelector<HTMLInputElement>('input[data-scale]')!
+  const scaleValEl = shadow.querySelector<HTMLElement>('[data-scale-val]')
+
+  function syncScale() {
+    const v = getPanelScale().scale
+    scaleInput.value = String(v)
+    updateRangeFill(scaleInput)
+    if (scaleValEl) scaleValEl.textContent = SCALE_DEF.fmt(v)
+  }
+
+  // 缩放值同样可以点着改
+  if (scaleValEl) {
+    const onScaleValClick = (e: Event) => {
+      e.stopPropagation()
+      startValueEdit({
+        el: scaleValEl,
+        value: getPanelScale().scale,
+        min: SCALE_DEF.min,
+        max: SCALE_DEF.max,
+        step: SCALE_DEF.step,
+        commit: v => setPanelScale('scale', v),
+        restore: () => syncScale(),
+      })
+    }
+    scaleValEl.addEventListener('click', onScaleValClick)
+    cleanups.push(() => scaleValEl.removeEventListener('click', onScaleValClick))
+  }
+
+  const onScaleInput = () => setPanelScale('scale', Number.parseFloat(scaleInput.value))
+  scaleInput.addEventListener('input', onScaleInput)
+  cleanups.push(() => scaleInput.removeEventListener('input', onScaleInput))
+  cleanups.push(onPanelScaleChange(() => {
+    applyPanelScale()
+    syncScale()
+  }))
+
+  applyPanelParams()
+  applyPanelScale()
+  syncScale()
+  syncUI()
+
+  inputs.forEach((input) => {
+    const handler = () => {
+      const key = input.dataset.key as FeatureKey
+      persist({ [key]: input.checked } as any)
+    }
+    input.addEventListener('change', handler)
+    cleanups.push(() => input.removeEventListener('change', handler))
+  })
+
+  cleanups.push(onConfigChange(() => syncUI()))
+
+  /* ===== 设置管理：恢复默认设置 ===== */
+
+  /**
+   * 把「默认设置」整体写回去：
+   * - 功能开关：persist(DEFAULT_CONFIG) 一次写全量 key（含 chrome.storage.sync 同步）
+   * - 数值参数：各 store.reset() 回 defs 里的 default，并写回各自的存储 key
+   * - 最后重新应用 CSS 变量与面板 UI，保证滑块 / 开关 / 数值立刻对齐
+   */
+  function restoreDefaults() {
+    persist({ ...DEFAULT_CONFIG })
+    resetGlassParams()
+    resetTopbarParams()
+    resetSearchBoxParams()
+    resetSearchPanelParams()
+    resetHomePanelParams()
+    resetPanelParams()
+    resetPreloadParams()
+    resetHomeCardParams()
+    resetPanelScale()
+    applyPanelParams()
+    applyPanelScale()
+    syncUI()
+    syncScale()
+  }
+
+  /** 「是否恢复默认设置」确认弹窗：与面板共用一套开合手感（淡入 + 轻微放大） */
+  function setConfirmOpen(open: boolean) {
+    confirmMask.classList.toggle('show', open)
+  }
+
+  const onResetClick = (e: Event) => {
+    e.stopPropagation()
+    setConfirmOpen(true)
+  }
+  const onConfirmCancel = (e: Event) => {
+    e.stopPropagation()
+    setConfirmOpen(false)
+  }
+  const onConfirmOk = (e: Event) => {
+    e.stopPropagation()
+    restoreDefaults()
+    setConfirmOpen(false)
+  }
+  // 点弹窗外的暗色区域 = 取消
+  const onConfirmMaskClick = (e: Event) => {
+    e.stopPropagation()
+    if (e.target === confirmMask) setConfirmOpen(false)
+  }
+  const onConfirmKeydown = (e: KeyboardEvent) => {
+    if (e.key !== 'Escape' || !confirmMask.classList.contains('show')) return
+    e.stopPropagation()
+    setConfirmOpen(false)
+  }
+
+  resetBtn.addEventListener('click', onResetClick)
+  confirmCancel.addEventListener('click', onConfirmCancel)
+  confirmOk.addEventListener('click', onConfirmOk)
+  confirmMask.addEventListener('click', onConfirmMaskClick)
+  document.addEventListener('keydown', onConfirmKeydown, true)
+  cleanups.push(() => {
+    resetBtn.removeEventListener('click', onResetClick)
+    confirmCancel.removeEventListener('click', onConfirmCancel)
+    confirmOk.removeEventListener('click', onConfirmOk)
+    confirmMask.removeEventListener('click', onConfirmMaskClick)
+    document.removeEventListener('keydown', onConfirmKeydown, true)
+  })
+
+  /**
+   * 面板开合。
+   * 打开时让透明遮罩接管 pointer-events：面板外的任何点击都落在遮罩上，
+   * 既不会穿透到页面（不会误触视频卡片 / 链接），同时关闭面板。
+   */
+  function setOpen(open: boolean) {
+    // 关面板时把还没提交的数值输入收掉（相当于失焦提交），别让编辑框挂在隐藏的 DOM 里
+    if (!open && editing) editing.finish(true)
+    if (open) panelBody.scrollTop = 0
+    // 关面板时顺手关掉确认弹窗，避免下次打开面板时它还挂着
+    else setConfirmOpen(false)
+    panel.classList.toggle('show', open)
+    overlay.classList.toggle('show', open)
+  }
+
+  const onBtnClick = (e: Event) => {
+    e.stopPropagation()
+    setOpen(!panel.classList.contains('show'))
+  }
+  const onCloseClick = (e: Event) => {
+    e.stopPropagation()
+    setOpen(false)
+  }
+  const onOverlayClick = (e: Event) => {
+    e.stopPropagation()
+    setOpen(false)
+  }
+  // 兜底：万一有事件绕过遮罩（如键盘触发），也按原设定关闭
+  const onDocClick = () => setOpen(false)
+  const onPanelClick = (e: Event) => e.stopPropagation()
+
+  btn.addEventListener('click', onBtnClick)
+  closeBtn.addEventListener('click', onCloseClick)
+  overlay.addEventListener('click', onOverlayClick)
+  document.addEventListener('click', onDocClick)
+  panel.addEventListener('click', onPanelClick)
+  cleanups.push(() => {
+    btn.removeEventListener('click', onBtnClick)
+    closeBtn.removeEventListener('click', onCloseClick)
+    overlay.removeEventListener('click', onOverlayClick)
+    document.removeEventListener('click', onDocClick)
+    panel.removeEventListener('click', onPanelClick)
+  })
+
+  return () => {
+    cleanups.forEach((fn) => { try { fn() } catch { /* noop */ } })
+    host.remove()
+    document.documentElement.style.removeProperty('--bili-panel-blur')
+    document.documentElement.style.removeProperty('--bili-panel-tint')
+    document.documentElement.style.removeProperty('--bili-panel-scale')
+    ;(window as any).__biliEliteSettingsInjected__ = false
+  }
+}

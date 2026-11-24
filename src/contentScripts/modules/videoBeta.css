@@ -1,0 +1,1442 @@
+/* ===== 播放页优化（内部代号 beta）· 满宽布局 + 经典版信息区 =====
+   挂在 html.bili-elite-video-beta 上（设置面板「界面优化 → 播放页优化」，1.1.4 起默认开启）。
+   所有选择器都带 #mirror-vdcon / .left-container / .right-container 这类播放页独有的类名，
+   所以这个 root class 挂在全站也不会波及其它页面。
+
+   B 站原样（1920×950 实测）：
+   1. `.video-container-v1` 是「居中 + 2540 封顶」的 flex，左右各空 178px；
+   2. 左栏宽度 / 播放器宽高由页面头部那段 setSize() 算好，写进 `<style id="setSizeStyle">`：
+      左栏 = min(窗口宽 - 112 - 右栏, 16:9 且塞得进一屏的高度)，1920×950 下只有 1123px
+      —— 高度先封顶，宽度也跟着缩，两侧留白就是这么来的；
+   3. 左栏里的顺序是「标题 + 播放数据 → 播放器 → 点赞/投币/收藏/分享 → 简介 → 标签 → 评论」，
+      标题顶在播放器上面，播放器就永远不可能贴到顶栏；
+   4. UP 主卡片在右栏最顶上（.up-panel-container），右栏第一屏是 UP 主 + 合集 + 推荐列表；
+   5. 右栏列表上方还有一条「推荐 / 最近上传 / 番剧 / 影视…」的分类条（.rcmd-tab-switcher）；
+   6. 播放器下面挂着一条 56px 的弹幕发送栏（.bpx-player-sending-area：观看人数 + 弹幕开关 +
+      输入框 + 发送），播放器总高因此是「16:9 视频 + 56」而不是纯 16:9。
+
+   这里改成（1.1.4 v009 的「经典版信息区」）：
+   1. 去掉 2540 封顶与居中，左右只留一条窄栏（--bili-vb-gutter，10px，两边一样宽）；
+      1.2.0 起这条窄栏和「左右栏间距」「播放器顶部留白」是同一个数（见 §1）；
+   2. 左栏宽度、播放器宽高按窗口重算（videoBeta.ts 写 CSS 变量）：右栏固定
+      clamp(380px, 33vw, 620px)，剩下全给播放器，高度就是纯 16:9（见第 9 条）；
+   3. 左栏改成两列栅格，从上到下：播放器 / 标题（话题链接跟在标题后面）/ UP 主 + 操作栏 /
+      简介灰卡 / 评论。操作栏（点赞那一排）从标题右边下移到 **UP 主头像右边** 那一行，
+      底下那条灰线一起去掉；
+   4. 播放量 / 弹幕数 / 发布时间从标题下面搬进简介卡顶部（videoBeta.ts 搬 DOM），
+      和简介合成一张灰底卡片（#v_desc）；
+   5. 视频标签（原来在简介下面那排灰色胶囊）由 videoBeta.ts 复制成 `#标签` 链接，
+      接到标题后面（蓝色），原来那排整条隐藏；
+   6. UP 主卡片由 videoBeta.ts 搬进左栏，压成「头像 / 名字 + 关注 / 粉丝数」；
+   7. 分类条整条隐藏，右栏直接从内容开始；右栏推荐卡的封面放到「右栏宽的 58%」（见第 3 条）；
+   8. 弹幕发送栏搬进控制栏中间（和全屏一致：居中、长相同原版、尺寸按控制栏收一档），
+      播放器收成纯 16:9。
+
+   为什么用 grid 而不是搬 DOM：搬走的节点在 Vue 的 vnode 树里还挂在原来的父级下，
+   父级一重渲染就可能被挪回去。grid 的 order 只是「显示顺序」，节点位置不变，Vue 感知不到。
+   真搬的只有三处（都要等页面水合完，见 videoBeta.ts 的 scheduleMove）：
+   UP 主卡片（跨容器）、播放数据（跨容器）、标签（跨容器，而且用克隆而不是搬 —— 见 decorateTags）。
+   水合期间动 DOM 会让 B 站把整棵子树重挂，那是「视频刚打开停顿重播」的根因。 */
+
+html.bili-elite-video-beta {
+  /* 下面几个数值由 videoBeta.ts 按窗口重算后写在 <html> 的行内样式里，
+     这里只是 JS 还没跑（或跑失败）时的兜底 */
+  --bili-vb-gutter: 10px;
+  --bili-vb-gap: 10px;
+  /* 播放器顶部那道白（1.2.0 统一白边）：两侧 / 中间 / 顶部三处都是这个数 */
+  --bili-vb-top-gap: 10px;
+  --bili-vb-rail: 470px;
+  --bili-vb-left: 1123px;
+  --bili-vb-player-h: 632px;
+  /* 话题链接的蓝：取自参考稿（#065FD4）。夜间模式在下面单独调亮，不然深蓝压在深底上看不清 */
+  --bili-vb-link: #065fd4;
+  /* 占位骨架的灰（UP 主那一行还没搬过来时画的灰圆 / 灰条 / 灰胶囊，见第 6 节） */
+  --bili-vb-skel: #e3e5e7;
+  /* 简介卡收起态的悬停高亮：取自参考稿的暖白 #FFF7F0（原来是冷灰 #eceef1）。
+     夜间那条没跟着改 —— 参考稿只有浅色，深底上压一层暖白会发糊。 */
+  --bili-vb-desc-hover: #fff7f0;
+}
+
+html.bili-elite-night.bili-elite-video-beta {
+  --bili-vb-link: #6ba7ff;
+  --bili-vb-skel: #2f3237;
+  --bili-vb-desc-hover: #313438;
+}
+
+/* ===== 1. 页面容器：去封顶、去居中，左右只留窄栏 =====
+   左右 padding 是同一个数。别为了「视觉等宽」去扣右侧的滚动条宽度 —— 滚动条 17px 比
+   gutter 还宽，扣完右侧 padding 就变 0，右栏直接贴在窗口边缘上（见 videoBeta.ts 的 measure()）。
+
+   **padding-top 是 1.2.0 的「统一白边」，但只对半顶栏生效（1.2.1）**：
+   半顶栏时左栏上移 64px，顶部留 10px 是给窗口边缘的呼吸；非半顶栏时顶栏还实打实占着
+   上方那 64px，再留 10px 就是顶栏和画面之间一条白缝 —— 用户要求去掉，所以那种模式下
+   这个变量是 0（由 videoBeta.ts 的 measure 按半顶栏状态写）。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) #mirror-vdcon.video-container-v1 {
+  max-width: none !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  padding-left: var(--bili-vb-gutter) !important;
+  padding-right: var(--bili-vb-gutter) !important;
+  padding-top: var(--bili-vb-top-gap, 10px) !important;
+  justify-content: flex-start !important;
+}
+
+/* ===== 2. 左栏 / 播放器尺寸 =====
+   B 站的数字来自 #setSizeStyle，这里靠特异性压过去。
+   宽屏 / 网页全屏 / 全屏（沉浸式）时不接管：那三种模式 B 站自己会算一套尺寸，
+   两边同时写会把播放器卡在错误的大小上（见 videoBeta.ts 的 ROOT_IMMERSIVE）。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) .left-container {
+  width: var(--bili-vb-left) !important;
+  flex: none !important;
+}
+
+/* 左栏钉住时的 top：**两种模式都要接管**。
+   以前这里不加 !important，让 B 站行内那套 `min(视口高 − 左栏高, 顶栏高)` 说了算 ——
+   半顶栏下它会把左栏又推回 64px（等于白移），非半顶栏下则和我们算的数对不上。
+   现在统一用 `--bili-vb-left-top`：B 站公式 + 顶部白边（半顶栏才有），由 leftPinTop 算好
+   （负值不动）。兜底给 `auto` 而不是某个像素值：变量缺了宁可「这一帧不钉」，也别把左栏
+   钉在一个猜出来的位置上（左栏比视口高时正确值是负数，猜成正数会让它卡在半空）。
+   只在 `.scroll-sticky` 上写 —— 没挂这个类时左栏还是 relative，top 会被当成偏移量把整栏推下去。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-half):not(.bili-elite-vb-immersive) .left-container.scroll-sticky {
+  top: var(--bili-vb-left-top, auto) !important;
+}
+
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) #playerWrap,
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) #bilibili-player {
+  width: var(--bili-vb-left) !important;
+  height: var(--bili-vb-player-h) !important;
+}
+
+/* 2.1 播放器圆角（YouTube 同款 12px，1.2.5 v014）。
+   B 站原版是纯直角：`.bpx-player-video-area` 铺一块纯黑、四边直接切在页面白底上。
+   圆角裁在 `.bpx-player-container` 上 —— 视频画面、弹幕层、控制栏、设置面板全在这一层
+   里，和 YouTube 一样「整块播放器一起圆」，控制栏的下边角也跟着弧过去。
+
+   `overflow: hidden` 必须加：`border-radius` 只把容器的边框盒切圆，里面的
+   `.bpx-player-video-area` 是实打实的黑底、四角仍是直角，不裁的话黑角会把圆弧盖住，
+   看上去还是方的。
+
+   为什么裁在 container 而不是 #playerWrap：`#playerWrap` 下面还挂着弹幕发送栏
+   （beta 已把它搬进控制栏，窗口态那 56px 是空的），裁它没有意义；而且
+   `#playerWrap` 的高度是 JS 算的，加圆角反而会在四个角露白。
+
+   容器本身没有 transform / filter / contain（实测），所以 `overflow: hidden`
+   不会给 fixed 定位的后代造出新的包含块 —— B 站的右键菜单（`.bpx-player-context-area`）
+   照旧能飞出播放器。
+
+   **挂类而不是挂 `[data-screen]`**：`data-screen` 只在 B 站那三个「屏幕模式」按钮之间
+   可靠维护，原生全屏（`requestFullscreen`）那一下它不一定跟着变成 `full` —— 一旦没变，
+   全屏播放器就会被切出四个缺口。`bili-elite-vb-round` 由 videoBeta.ts 按
+   `getPlayerScreen()` 挂（原生全屏优先看 `document.fullscreenElement`，见 playerMode.ts）：
+   窗口态 / 宽屏 / 小窗有，网页全屏 / 全屏没有（那两种模式播放器铺满整屏，
+   圆角就是屏幕边上的缺口）。 */
+html.bili-elite-video-beta.bili-elite-vb-round .bpx-player-container {
+  border-radius: var(--bili-radius-md, 12px);
+  overflow: hidden;
+}
+
+/* 2.2 四角残留：容器圆角裁不到的那几层（1.2.5 v016）
+   只给容器写 radius + overflow 时，四角还会露出**黑色直角**（用户报的「黑色的角」）。
+   实测把 `#bilibili-player-placeholder-top` 的背景临时染红，四个角立刻变红 —— 它才是黑角的
+   来源：它是 `#playerWrap` 下、`#bilibili-player` 之外的**兄弟层**（absolute + z-index 0），
+   压根不在容器里，容器的 overflow + radius 一个像素都裁不到。它是 B 站播放器初始化前铺的
+   那块纯黑骨架（和播放器同尺寸），四角是直角 → 圆角外露出四个黑色小三角。
+
+   同一原因还有第二处：`.bpx-player-video-area` 自己也是纯黑直角，而它里面的进度条
+   `.bpx-player-progress-schedule-current` 带 transform（合成层）—— Chromium 对合成层后代的
+   圆角裁切会漏。所以 video-area 自己也写 radius + overflow，再叠一层 mask：mask 作用在合成
+   **结果**上，合成层也跑不掉。
+
+   **mask 只加在 video-area，不加在容器上**：mask 会给后代造出 containing block，而 B 站的
+   右键菜单 `.bpx-player-context-area`（fixed）是容器的子元素、不在 video-area 里（实测），
+   加在容器上会把它锁死在播放器范围内。
+
+   `.bpx-player-primary-area` 是 video-area 的父级（同尺寸、背景透明），一起写圆角是因为
+   某些屏幕模式下它会自己接管底色，漏了就会在圆角外露一层直角。
+   `#bilibili-player-placeholder-bottom` 不用管：beta 已经把发送栏收掉，那截灰条
+   §9 里整条 display: none 了。 */
+html.bili-elite-video-beta.bili-elite-vb-round .bpx-player-primary-area,
+html.bili-elite-video-beta.bili-elite-vb-round .bpx-player-video-area,
+html.bili-elite-video-beta.bili-elite-vb-round #bilibili-player-placeholder {
+  border-radius: var(--bili-radius-md, 12px);
+}
+
+/* 2.3 圆角上的深色弧线：占位骨架的圆角要比播放器再「收」一点（1.2.5 v018）
+   v016 之后四角不黑了，但弧线上留了一条 1~2px 的深灰虚线（用户报的「黑线」）。
+   逐个染色的实测过程：
+     - 把 .bpx-player-video-area 的底色染绿 → 弧线仍是中性灰，不是它；
+     - 把 #bilibili-player-placeholder-top 染红 → 红色不出现（它被播放器整个盖住），
+       但把它 display: none、或者只把圆角改成 16px，弧线立刻消失 → 只能是它的黑底。
+   原因：播放器里外一共三层圆角（容器 → video-area → video 合成层）。Chromium 对合成层的
+   圆角裁切按整像素量化、并且比普通绘制「往里收」约 1.5px；而占位骨架是普通绘制，抗锯齿
+   边缘落在更外圈。两者差出来的那一圈里，占位骨架的黑底露了出来 —— 视频画面是浅色时就是
+   一条深色弧线，量化成整像素后变成断续的「虚线」。
+   办法：占位骨架的圆角比播放器再放大 4px（收得更狠），黑底就整个落进视频的裁剪范围内。
+   +4 是量出来的（+2 还剩 8 个暗像素，+4 归零）。再多也不影响观感 —— 这层只在播放器
+   初始化前露出来，是纯黑骨架，圆角大 4px 肉眼看不出来。 */
+html.bili-elite-video-beta.bili-elite-vb-round #bilibili-player-placeholder-top {
+  border-radius: calc(var(--bili-radius-md, 12px) + 4px);
+}
+
+html.bili-elite-video-beta.bili-elite-vb-round .bpx-player-video-area {
+  overflow: hidden;
+  isolation: isolate;
+  -webkit-mask-image: linear-gradient(#000, #000);
+  mask-image: linear-gradient(#000, #000);
+}
+
+/* ===== 3. 右栏宽度与间距 + 推荐卡封面 =====
+   右栏宽度**只在窗口态**接管。宽屏 / 网页全屏下 B 站自己算一套（宽屏实测 411px），
+   我们还按 620 压过去的话，B 站按自己的窗口宽度算出来的播放器（1910）会横穿到右栏上
+   —— 用户看到的「宽屏模式乱掉」就是它（截图里推荐卡被压成一条、还压在画面底下）。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) .right-container {
+  width: var(--bili-vb-rail) !important;
+  margin-left: var(--bili-vb-gap) !important;
+}
+
+/* 右栏顶部对齐：这 20px 原本是「UP 主卡片 -> 推荐列表」之间的间距，UP 主卡片 v013 起
+   被 sticky 挪到左栏、不再占右栏的流，于是它变成顶栏下面一条凭空的空白
+   （用户截图：「接下来播放」离顶栏还有一段距离）。清掉之后推荐列表顶到和左栏播放器
+   同一条水平线上 —— 右栏的 gutter 本来就是上下共用的，别再单独留一层。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) .right-container-inner .rcmd-tab > .recommend-list-v1 {
+  margin-top: 0 !important;
+}
+
+/* 推荐卡封面：B 站原样 141×80，在右栏里又小又扁。v009 放到 172×97，v010 再放到
+   「右栏宽的 58%」（1600 窗口下 306×172，线性约 1.8 倍、面积约 3 倍），卡片高度跟着封面走，
+   文字那侧还剩 210 上下，标题两行排得开。
+   **别只改 .pic-box**：B 站的封面是四层定宽叠出来的 —— .pic-box(141×80) → .framepreview-box
+   → a.video-awesome-img(141×80) → .b-img → img，里面几层写的是 100%，但百分比是相对**父级**
+   那 141px 算的，所以父级不放开、图就还是 141×80（v009 就是这么漏掉的：外面盒子大了，图没变）。
+   用 aspect-ratio 而不是写死高度：右栏宽度随窗口变，高度跟着走才不会变形。
+
+   外面再乘一个倍率（--bili-vb-cover-scale），就是设置面板「播放页优化 →
+   封面大小」那条滑块（railCardConfig.ts）。**必须乘在整条 clamp 上、不能只改上限 320**：
+   窄窗口下真正生效的是中间那个 58%，只抬上限的话拖滑块一点反应都没有。
+   滑块默认 220px（倍率 0.6875），也就是 clamp 实际退化成 clamp(131px, 40%, 220px)；
+   滑块拖到 320 时倍率正好是 1，这一行与 1.1.5 之前逐字节等价。 */
+html.bili-elite-video-beta .video-page-card-small .pic-box {
+  width: calc(clamp(190px, 58%, 320px) * var(--bili-vb-cover-scale, 1)) !important;
+  height: auto !important;
+  /* 比例照抄 B 站原版那张卡（141×80 = 1.7625），只放大不改比例 ——
+     封面源图是 `@336w_190h_1c`（1.768），两者差 0.3%，肉眼看不出来，也不会有裁切感 */
+  aspect-ratio: 141 / 80;
+}
+
+html.bili-elite-video-beta .video-page-card-small .pic-box .framepreview-box,
+html.bili-elite-video-beta .video-page-card-small .pic-box .video-awesome-img {
+  width: 100% !important;
+  height: 100% !important;
+  left: 0 !important;
+  top: 0 !important;
+}
+
+html.bili-elite-video-beta .video-page-card-small .pic-box .pic,
+html.bili-elite-video-beta .video-page-card-small .pic-box .b-img,
+html.bili-elite-video-beta .video-page-card-small .pic-box img {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+html.bili-elite-video-beta .video-page-card-small .pic-box img {
+  object-fit: cover;
+}
+
+/* 悬停内联预览（鼠标停在卡上，B 站往 .v-recommend-inline-player 里塞一个**迷你播放器**）。
+   那个播放器是按 **141×80 那张小卡** 定尺寸的（实测整条链都是 190×107：
+   .bpx-docker → .bpx-player-container → .bpx-player-primary-area → video），
+   `object-fit` 还是 `contain`。封面放大到 320×180 之后两个毛病都出来了：
+     1. 预览缩在左上角，剩下一圈露出 `.pic-box` 的灰底 —— 看着像「没铺满的黑边」；
+     2. 竖屏视频（实测 392×854）在 190×107 里 contain，左右两条大黑边。
+   所以把整条链都撑满封面、视频按 cover 裁（跟封面同一套视觉）。
+   这条链上每一层都得写：B 站给 .bpx-docker 定的是 190px，只放开最外面没用。 */
+html.bili-elite-video-beta .video-page-card-small .pic-box .v-recommend-inline-player,
+html.bili-elite-video-beta .video-page-card-small .pic-box .bpx-docker,
+html.bili-elite-video-beta .video-page-card-small .pic-box .bpx-player-container,
+html.bili-elite-video-beta .video-page-card-small .pic-box .bpx-player-primary-area,
+html.bili-elite-video-beta .video-page-card-small .pic-box .bpx-player-video-area,
+html.bili-elite-video-beta .video-page-card-small .pic-box video {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+html.bili-elite-video-beta .video-page-card-small .pic-box video {
+  object-fit: cover !important;
+}
+
+/* ===== 4. 分类条不要（推荐 / 最近上传 / 番剧 / 影视…） ===== */
+html.bili-elite-video-beta .rcmd-tab-switcher {
+  display: none !important;
+}
+
+/* ===== 5. 左栏栅格 =====
+   第 1 列 minmax(0, 1fr) 而不是 1fr —— 否则长标题会把列宽撑开（grid 的 min-content 陷阱）。
+   第 2 列 auto：宽度由操作栏自己决定（它里面是几个定宽的按钮，宽度不随窗口变）。
+
+   行序：1 播放器 / 2 标题 / 3 UP 主 + 操作栏 / 4 简介灰卡 / 5 资源块 / 6 评论 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) .left-container {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-content: start;
+}
+
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) #playerWrap {
+  grid-row: 1;
+  grid-column: 1 / -1;
+}
+
+/* 标题整行。操作栏下移之后标题独占一行，长标题 + 一串话题链接也排得开。
+
+   `#viewbox_report` 用 display: contents —— 它自己不再生成盒子，里面的
+   `.video-info-title` / `.video-info-meta` 直接变成左栏栅格的 item。
+   这是为了把「播放数据」放进简介卡里而**不搬 DOM**，原因见第 7 节。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) #viewbox_report {
+  display: contents !important;
+}
+
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) .video-info-title {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  height: auto !important;
+  /* 原来那 22px 上边距挂在 #viewbox_report 的 padding 上，contents 之后没了。
+     v019 从 18 收到 10：标题离播放器太远，整块信息区显得散。 */
+  margin-top: 10px;
+}
+
+/* 标题改成行内流：B 站给 h1 挂的是「两行 -webkit-box + 省略号」，话题链接要接在标题
+   正文后面（参考稿就是一行读完），那就得让它按普通行内文字排、不截断。
+   容器也要 display:block（B 站是 flex），否则 h1 与话题那一串不会在同一行里接着排。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) .video-info-title-inner {
+  display: block !important;
+}
+
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) .video-title {
+  display: inline !important;
+  overflow: visible !important;
+  -webkit-line-clamp: unset !important;
+  max-height: none !important;
+}
+
+/* 话题串 = **播放数据那一行的伪元素**（v018：从标题后面挪到播放信息后面，
+   和参考稿一致：`4257  0  2026-10-28 10:36:47  #美国 #联合国 #古巴`）。
+   为什么不用真节点：往 Vue 管的容器里 append 一个 span 会让 B 站顶栏那次 mount 失败
+   （`nextSibling` 报错 → `#biliMainHeader` 空盒子 = 顶栏一条白），实测插了 5/5 复现。
+   伪元素不进 DOM，B 站怎么 patch 都碰不到它；代价是不可点击，所以还有第二段接力（见下）。
+   字号跟播放数据一致（12px / 行高 18），`margin-left` 不写 —— 上一个 `.item` 自带
+   `margin-right: 14px`，两边间距就是它。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) .video-info-detail-list::after {
+  content: var(--bili-vb-topics, '');
+  color: var(--bili-vb-link);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: pre-wrap;
+  /* 播放数据那一行是 flex + nowrap，标签长了会顶出去 —— 允许折行，
+     行高变了由 videoBeta.ts 把卡片的上内边距跟着改（`--bili-vb-desc-top`） */
+  word-break: normal;
+}
+
+/* 真链接版（v014）：顶栏挂稳之后 videoBeta.ts 会把真 `<a>` 插进来，挂上
+   `html.bili-elite-vb-topics-live`，这时把上面那个伪元素收起来 —— 两者文字完全一样，
+   切换是像素级的，但只有真链接能点。
+   **为什么不在第一帧就插真节点**：往 Vue 管的容器里 append 会让 B 站顶栏那次 mount 失败
+   （见文件头的实测数据），所以要等「顶栏有孩子 + 左栏连续 800ms 没动 + 过 4.5s」。
+   伪元素负责第一帧的视觉，真链接负责可点击，两段接力。 */
+html.bili-elite-video-beta.bili-elite-vb-topics-live .video-info-detail-list::after {
+  content: none;
+}
+
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) .bili-elite-vb-topics {
+  display: inline;
+  /* 和伪元素那版保持**逐像素一致**：标签之间是真空格（不是 margin），
+     否则从伪元素换成真链接时会重排一下（用户看到的「#蓝色标签加载完动一下」）。
+     左间距交给上一个 `.item` 的 margin-right，这里不再加。 */
+  white-space: pre-wrap;
+  word-break: normal;
+  /* 跟着播放数据（12px / 行高 18）；不写就会继承到容器更大的字号 */
+  font-size: 12px;
+  line-height: 18px;
+}
+
+html.bili-elite-video-beta .bili-elite-vb-topics a {
+  margin: 0;
+  color: var(--bili-vb-link);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color var(--bili-dur-fast) var(--bili-ease);
+}
+
+html.bili-elite-video-beta .bili-elite-vb-topics a:hover {
+  text-decoration: underline;
+}
+
+/* 原标签行整条不要（标签已经变成标题后面的话题链接）。
+   只在**真的生成过话题链接**时才藏（`.bili-elite-vb-topics-on` 由 decorateTags 挂）——
+   没有标签的稿件那条里只剩「发现《xxx》」那颗音乐标签，藏了就把入口弄没了。
+   注意别顺手把 #bgm-entry 也藏了 —— 那是另一个节点。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive).bili-elite-vb-topics-on .video-tag-container {
+  display: none !important;
+}
+
+/* ===== 6. UP 主卡片：**不搬 DOM**，用 sticky 画到左栏第 3 行 =====
+   v013 起彻底不搬（BewlyCat 那套）：卡片留在右栏的流里，位置 / 宽度由 videoBeta.ts 的
+   layoutUp() 写进 `--bili-vb-up-*`；v017 起用 `position:sticky`（不是 absolute），
+   这样它和左栏用的是同一套「钉住」逻辑。
+   为什么不搬 —— 往 #mirror-vdcon 里搬节点会让 B 站顶栏那次 mount 失败（`nextSibling` →
+   `#biliMainHeader` 空盒子 = 一条白，视频还会停顿重播），见 videoBeta.ts 的 MOVE_DELAY 注释。
+   不搬的额外好处：卡片第一帧就在正确位置，不用等 3s，也不用灰色骨架占位。
+
+   右栏两层都别再当 containing block —— `.right-container-inner` 是 sticky，
+   不让它降级的话绝对定位的参照物会跟着它走。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) .right-container,
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) .right-container-inner {
+  position: static !important;
+}
+
+/* UP 卡改成 sticky 之后，它在右栏里是**正常流**里的第一个块：margin-top 把它推到标题下面，
+   margin-bottom 再把这截空间收回，两个值一抵消右栏的排版一个像素都不变。
+   但子元素的上外边距会跟父元素**合并**（整条右栏被推下去 627px），所以右栏得自己变成 BFC。
+   用 flow-root 而不是 overflow: hidden —— 后者会把卡片裁掉。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) .right-container-inner {
+  display: flow-root;
+}
+
+/* **左栏的 sticky 要留着**（v017 纠正 v015）：B 站给 `.left-container` 挂的是
+   `.scroll-sticky` + 行内 `top`，值是「视口高 − 左栏高」（实测左栏 699、视口 685 时 top: -14px；
+   左栏只有 276 时夹到 64，也就是顶栏下沿）。效果就是**左栏滚到底就钉住，右栏推荐继续往下滑**
+   —— 评论很少（「没有更多评论」）时尤其明显，那正是用户要的「和原版一致」。
+   v015 把它降成 static 是为了迁就「UP 卡绝对定位在 #mirror-vdcon 上」那套坐标系，
+   现在卡片也改成 sticky（见下），两者钉在同一个位置上，不需要再牺牲左栏的 sticky 了。
+
+   注意：这里**不写 position**，用 B 站自己的 `.scroll-sticky`；它的行内 top 由 videoBeta.ts
+   读出来算给卡片（`--bili-vb-up-top` = 它 + up-y）。读不到行内值时才用同一个公式兜底，
+   见 videoBeta.ts 的 leftPinTop()。
+
+   `top` 只给**兜底值**：B 站是「第一次滚动时才写行内 top」的，在那之前（首屏 / 还在加载）
+   左栏根本没有 sticky top，卡片也就钉不住 —— 用户看到的「UP 主控件被滚轮带走」。
+   行内样式优先级天然高于这里，B 站一写就接管，不会打架。值由 videoBeta.ts 写进
+   `--bili-vb-left-top`（= min(视口高 − 左栏高, 顶栏高)，和 B 站那个公式一致）。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) .left-container {
+  align-self: flex-start !important;
+  top: var(--bili-vb-left-top, auto);
+}
+
+/* 卡片：**sticky 而不是 absolute**（v017）。
+   absolute 是挂在 `#mirror-vdcon` 上的，左栏一旦 sticky，两个坐标系就错开（v015 的老毛病）；
+   改成 sticky 之后卡片和左栏用同一套「钉住」逻辑，浏览器原生做，滚动时零延迟、不会掉帧。
+
+   四个数各管一件事：
+     margin-top      = --bili-vb-up-y − --bili-vb-half-shift   卡片的自然位置（标题下方 8px）
+     margin-bottom   = -(up-y − half-shift + up-h)             把这截空间还给右栏（右栏排版不变）
+     translate       = -(left + gap)    横向挪到左栏（translate 不影响布局，也不会被 sticky 夹住）
+     top             = --bili-vb-up-top = 左栏钉住的位置（常量）+ up-y，见 videoBeta.ts 的 leftPinTop
+   **margin 是从右栏顶边量的，up-y 却是「相对左栏顶边」**（卡片在左栏里该画到哪儿）：
+   非半顶栏两边都从同一处起算（右栏顶边 = 左栏顶边，都含 §1 那道 padding），差 0；
+   半顶栏把左栏上移了 64px（整个顶栏高），右栏没动，这 64px 的落差必须在这里减掉 ——
+   否则卡片整体低 64px，正好压在简介卡上（v012 用户截图：名字 / 粉丝数 / 话题叠成一团）。
+   两个 margin 一起减同一个数，相加仍然 = -卡片高，右栏的排版一个像素都不动。
+   top 是个**常量**，只在布局变了（左栏变高 / 窗口变宽 / 标题折行 / 播放器挂上）时重算一次 ——
+   滚动过程中 videoBeta.ts 一个字节都不写，钉住全交给浏览器原生 sticky。
+   左栏没被钉住时（还是 relative / 高度还是 0）变量是空的，`top: auto` 就等于不钉 —— 两边一起滚。
+   v022 曾经在滚动里直接写卡片的行内 top（所以这里还不敢加 !important），v023 把那套回调删了，
+   现在只有一个写入方（CSS 变量），不会打架。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) .up-panel-container {
+  position: sticky !important;
+  top: var(--bili-vb-up-top, auto);
+  margin: calc(var(--bili-vb-up-y, 0px) - var(--bili-vb-half-shift, 0px)) 0 calc(-1 * (var(--bili-vb-up-y, 0px) - var(--bili-vb-half-shift, 0px) + var(--bili-vb-up-h, 48px))) 0 !important;
+  width: var(--bili-vb-up-w, auto) !important;
+  translate: calc(-1 * (var(--bili-vb-left) + var(--bili-vb-gap))) 0;
+  box-sizing: border-box;
+  /* 卡片要压在左栏内容之上（它跟操作栏同一行，左边是卡片、右边是操作栏） */
+  z-index: 1;
+}
+
+/* **纯 CSS 的最后一道闸（v003）**：B 站把 `.scroll-sticky` 从左栏摘掉（也就是「左栏不再吸顶」）
+   的那一瞬间，卡片必须一起停止钉住。这一条不经过 JS，所以「观察器失联 / 变量僵死」也拖不住它 ——
+   否则卡片会拿着上一次的 `--up-top` 钉在半空、压着评论区（用户报的「UP 主信息控件悬浮」）。
+   常规清理在 videoBeta.ts 的 syncUpPin（它管 room 归 0 那种情况，CSS 判不出来）。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) .left-container:not(.scroll-sticky) ~ .right-container .up-panel-container {
+  top: auto !important;
+}
+
+/* 位置还没量出来之前先把卡片藏起来：首屏前几百毫秒标题还没排版（甚至高度是 0），
+   那时 up-y 要么没有（卡片贴在右栏最上面）、要么按 0 高的标题算（卡片压在标题上）——
+   就是用户看到的「刚打开网页各种控件挤在一起」。`bili-elite-vb-up-ready` 由 layoutUp() 挂上。
+   用 visibility 而不是 display：占位还在，左栏的行高不会跟着跳。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive):not(.bili-elite-vb-up-ready) .up-panel-container {
+  visibility: hidden;
+}
+
+/* 左栏第 3 行给卡片留出位置。伪元素是 grid item、不进 DOM，水合期间随便用。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) .left-container::before {
+  content: '';
+  grid-row: 3;
+  grid-column: 1;
+  /* --bili-vb-up-h 是卡片自身高度，占位再多留 10px —— 就是卡片和简介卡之间的那道缝。
+     （简介卡自己还有 8px margin-top，但它和卡片那 8px 的偏移正好抵消，视觉间距 = 这里多加的 10） */
+  height: calc(var(--bili-vb-up-h, 48px) + 10px);
+}
+
+html.bili-elite-video-beta .up-info-container {
+  height: auto !important;
+  align-items: center;
+}
+
+/* 头像图还没到 / 被懒加载卡住时，别让那块是透明的 —— 官方也是灰圆。
+   （B 站的 bili-avatar 只在元素可见时才把 data-src 落到 src 上，而这块面板在搬过来之前
+   一直是 display:none，所以它那个懒加载永远不会触发，videoBeta.ts 的 kickAvatar 手动补） */
+html.bili-elite-video-beta .up-panel-container .bili-avatar {
+  background-color: var(--bili-vb-skel);
+}
+
+/* 头像上的「装饰」会把这一格撑大，两种都得按「无装饰」的原样钉回 48：
+   1) 挂件（`.has-pendant`）：wrap 撑到 80×80，`.bili-avatar` 行内 `40.8px` +
+      `translate(3.6px,3.6px)`，再叠一张 72×72 的挂件图 `.bili-avatar-pendent-dom`；
+   2) 数字藏品头像（`.is-nft`）：wrap 同样是 80×80，但 `.up-avatar` 只有 47、`.bili-avatar`
+      行内 `54.24px` + `translate(-3.12px,-3.12px)`（= 48 × 1.13），右下角挂一枚 27.5% 的
+      `nft-label.gif`（`.bili-avatar-nft-icon`）。**画出来 54、wrap 却 80** —— 多出的 26px
+      全是死空间，所以它比挂件那种更冤：空隙更大，头像本身还更小。
+   于是这一行从 48 高变成 80 高 —— 用户说的「这个 UP 主的控件上下空隙特别大」就是它
+   （标题下 10px 没变，是卡片自己胖了 32px，把简介卡往下推、左栏第 3 行占位也跟着长）。
+   处理：wrap / a / bili-avatar 三层尺寸按无装饰的原样钉回 48（实测普通稿件：三层全是 48、
+   translate 0）。行内 style 必须 !important 才盖得住。
+   挂件图整张藏掉（72px 的框套在 48 的圆上没法看）；**NFT 那个小角标留着** —— 它是 27.5%
+   的百分比尺寸，跟着头像缩到 13px，本来就是 B 站全站通用的「数字藏品」标记，藏掉等于抹掉信息。
+   **不删节点**：`.has-pendant` / `.is-nft` 都是 Vue 的 class，摘 DOM 会踩它的 patch（见文件头第 3 条）。 */
+html.bili-elite-video-beta .up-panel-container .up-avatar-wrap.has-pendant,
+html.bili-elite-video-beta .up-panel-container .up-avatar-wrap.is-nft {
+  width: 48px !important;
+  height: 48px !important;
+}
+
+html.bili-elite-video-beta .up-panel-container .up-avatar-wrap .bili-avatar-pendent-dom {
+  display: none !important;
+}
+
+html.bili-elite-video-beta .up-panel-container .up-avatar-wrap .up-avatar,
+html.bili-elite-video-beta .up-panel-container .up-avatar-wrap .bili-avatar {
+  width: 48px !important;
+  height: 48px !important;
+}
+
+/* 有装饰时 B 站给头像写了位移：挂件是 `translate(3.6px,3.6px)`（塞进挂件的圆里），
+   NFT 是 `translate(-3.12px,-3.12px)`（放大 1.13 倍后居中）。头像满 48 之后要归零，
+   否则挂件那种偏右下 3.6px、NFT 那种偏左上 3.12px。 */
+html.bili-elite-video-beta .up-panel-container .up-avatar-wrap .bili-avatar {
+  transform: none !important;
+}
+
+/* 操作栏：第 3 行第 2 列 —— 和 UP 主那一行同一行，右对齐。
+   垂直居中靠 align-self: center（UP 主那行是 48px 头像，操作栏 28px 按钮），
+   margin-top 8 是跟着 UP 主的 margin-top 10 走，视觉上落在头像中线上。
+
+   底下那条 1px 灰线是 B 站给「操作栏 + 简介」分段用的，现在操作栏跑到 UP 主那一行了，
+   它变成一条悬在 UP 主和简介之间的孤线，去掉（padding 也一起收，不然会撑出一块空白）。 */
+/* 操作栏的列宽必须**钉死**：`.left-container` 的第 2 列是 `auto`，而操作栏自己的宽度
+   会从 426 长到 436（B 站右侧那块内容晚到 10px）。列一变宽、第 1 列就变窄，整排
+   点赞 / 投币 / 收藏 会跟着跳一下 —— 用户看到的是「UP 主信息加载完，操作栏又动了一下」。
+   四个 `.toolbar-left-item-wrap` 是**固定 92px**，总宽跟稿件无关，所以按实测的最终宽度
+   先把位置占住（92 × 4 + 内部间距 68）。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) #arc_toolbar_report {
+  grid-row: 3;
+  grid-column: 2;
+  min-width: 436px;
+  align-self: center;
+  justify-content: flex-end;
+  margin-top: 8px;
+  padding: 0 !important;
+  border-bottom: none !important;
+  /* 播放数据是异步到的（「1.2万」→「1.3万」宽度会变），等宽数字让这一排少抖两下 */
+  font-variant-numeric: tabular-nums;
+}
+
+/* 操作栏**右侧那块**（「更多」省略号）从 26px 长到 36px，而整行是 flex-end 对齐 ——
+   右边一长，左边那四个按钮就整体被推走 10px（实测 591 → 581）。
+   给它一个固定的最小宽度，第一帧就按最终尺寸排，之后谁长都不影响左边。
+   这个块是定宽图标按钮，跟稿件无关。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) #arc_toolbar_report .video-toolbar-right {
+  min-width: 36px;
+  justify-content: flex-end;
+}
+
+/* 右半边现在只剩「名字 / 关注 / 粉丝数」，靠左排 */
+html.bili-elite-video-beta .up-info--right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: auto;
+  min-width: 0;
+}
+
+html.bili-elite-video-beta .up-info__detail {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 两行两列：名字在上、粉丝数在下，关注按钮占第 2 列并跨两行垂直居中 ——
+   于是它正好夹在「名字」和「粉丝数」之间（参考图里订阅键就是横跨那两行的）。
+   column-gap 10px 是名字与按钮的间隙。 */
+html.bili-elite-video-beta .up-detail {
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  align-content: center;
+  align-items: center;
+  justify-content: start;
+}
+
+html.bili-elite-video-beta .up-detail-top {
+  grid-row: 1;
+  grid-column: 1;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+/* B 站原本给名字留了「右边 72px 给发消息」的上限，现在发消息去掉了，放开 */
+html.bili-elite-video-beta .up-name {
+  max-width: 100% !important;
+  margin-right: 0 !important;
+}
+
+/* 简介下面还有一份（#v_desc），这张卡里的那行折行简介会把它挤成三行，去掉 */
+html.bili-elite-video-beta .up-description {
+  display: none !important;
+}
+
+/* 充电 / 发消息不要（只留名字、关注、粉丝数）。
+
+   充电按钮有**两套实现**：新的 `.new-charge-btn`、经典的 `.old-charge-btn`
+   （BV1SRn66JE21 就是后者）。之前只按 `.new-charge-btn` 藏，老版的就漏在外面了 ——
+   而且数据没到之前它是一个**空的** `.default-btn.old-charge-btn`（28×28 的灰方块，
+   用户截图里那个小方块），加载完才变成 56×28 的「充电」——占位和实际对不上。
+   所以不按类名挑，按「面板里除关注按钮以外的 default-btn」整类藏掉（两种实现 + 空占位都包住）。 */
+html.bili-elite-video-beta .upinfo-btn-panel .default-btn:not(.follow-btn),
+html.bili-elite-video-beta .up-detail-top .send-msg {
+  display: none !important;
+}
+
+/* 关注按钮：夹在名字和粉丝数之间，所以别再让它撑满（B 站原本 flex: 1 → 230px 宽） */
+/* 关注按钮不搬 DOM、也不绝对定位 —— B 站本来就把「名字块 + 按钮」放在同一个 flex 行里
+   （`.up-info--right > .up-info__detail + .up-info__btn-panel`），只是 `.up-info__detail`
+   写了 `flex: 1 1 auto` 会撑满、把按钮推到最右边。这里把 detail 改成「不长大」，
+   按钮自然就贴在名字右边，垂直居中由 align-items: center 负责 —— 跟参考稿一致。 */
+html.bili-elite-video-beta .up-info--right {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: auto;
+  min-width: 0;
+}
+
+html.bili-elite-video-beta .up-info__detail {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+html.bili-elite-video-beta .up-info__btn-panel {
+  flex: none;
+  margin: 0 !important;
+}
+
+html.bili-elite-video-beta .upinfo-btn-panel {
+  margin-top: 0 !important;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+html.bili-elite-video-beta .upinfo-btn-panel .default-btn {
+  flex: none !important;
+  width: auto !important;
+  min-width: 0;
+  height: 28px;
+  padding: 0 14px !important;
+  font-size: 13px;
+}
+
+/* 关注按钮的**空占位**：B 站先渲染一个没有 `.b-gz` 的空 `.default-btn`（28×28 的灰块），
+   数据到了才换成带 `.b-gz` 的真按钮（74×28）。两者尺寸不一样，换的那一下会把右边的
+   内容顶出去一截（用户截图里那个灰方块就是它）。
+   这里把空占位撑成真按钮的形状 —— 尺寸 / 圆角 / 底色都对上，换上真按钮时零位移。
+   高度 28、宽度 74 是实测「关注」两字 + 14px 内边距的结果；「已关注」会宽 10 来 px，
+   那是状态变化、不是加载抖动，可以接受。 */
+html.bili-elite-video-beta .upinfo-btn-panel .follow-btn:not(.b-gz) {
+  width: 74px !important;
+  height: 28px !important;
+  padding: 0 !important;
+  border-radius: 14px;
+  background: var(--bili-vb-skel) !important;
+}
+
+/* 粉丝数：从关注按钮的文字里拆出来（「关注 1882.4万」→「关注」+ 这一行），
+   值写进 `--bili-vb-fans`。同样用伪元素，不插节点。 */
+html.bili-elite-video-beta .up-detail::after {
+  content: var(--bili-vb-fans, '');
+  grid-row: 2;
+  grid-column: 1;
+  margin-top: 1px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text3);
+}
+
+/* ===== 6.5 多人合作投稿（创作团队）=====
+   多人稿件的 UP 面板是**另一套结构**（videoBeta.ts 检测到 `.members-info-container` 之后
+   给 <html> 挂 `bili-elite-vb-multi`）：
+
+     .members-info-container        padding-top: 18
+       .membersinfo-normal
+         .header                    「创作团队 5人」通栏灰条，44 高，右侧一颗折叠箭头
+         .container                 行内 max-height: 102px + overflow: hidden（折叠态）
+           .membersinfo-upcard-wrap × N     头像 40 + 名字 + 角色标签
+
+   两个问题：
+   1. 那条横幅占掉 44px，头像要等到标题下面 52px 才出现 —— 单 UP 是 8px，整块信息区
+      看着就散了；
+   2. 横幅本身是通栏灰底，比头像那一行重得多，把「UP 主控件」这个视觉单元切成两段。
+
+   所以整条拿掉，并把上方两截内边距（container 的 18 + 12）一起清零 ——
+   头像顶边因此**直接落在卡片顶边**，「头像 ↔ 标题 = 8、卡片 ↔ 简介 = 10」
+   和单 UP 逐像素一致（那两个数由 videoBeta.ts 的 UP_GAP 和 ::before 占位决定）。
+
+   `max-height` / `overflow` 必须跟着放开：折叠本来是靠横幅右边那颗箭头展开的，
+   横幅一藏就没有展开入口，成员超过一行会被裁掉（5 人正好 435 宽、一行放得下，
+   8 人以上就会折行）。放开后由 flex 自然折行，行距交给 `row-gap`。
+   行内 `max-height` 是 B 站写的，只能 !important 压。
+   `padding-bottom: 20` 是每张成员卡自带的下边距（给折行后的第二行留缝），
+   单行时它就是卡片底部一截凭空的空白 —— 一起收掉，行距改由 `row-gap` 出。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive).bili-elite-vb-multi .up-panel-container .members-info-container {
+  padding-top: 0 !important;
+}
+
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive).bili-elite-vb-multi .up-panel-container .membersinfo-normal > .header {
+  display: none !important;
+}
+
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive).bili-elite-vb-multi .up-panel-container .membersinfo-normal > .container {
+  padding-top: 0 !important;
+  max-height: none !important;
+  overflow: visible !important;
+  row-gap: 12px;
+}
+
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive).bili-elite-vb-multi .up-panel-container .membersinfo-upcard-wrap {
+  padding-bottom: 0 !important;
+}
+
+/* 操作栏（点赞那一排）单 UP 时靠 `align-self: center` 落在 48px 头像的中线上。
+   多人卡片里第一行是 40px 头像、下面还压着名字和角色标签，整卡 84 高 ——
+   再居中就掉到「名字」那一行去了，用户要的是「和多个 UP 主同一行」。
+   改成按顶边排，10 = 8（卡片顶边相对第 3 行顶边的偏移，也就是 UP_GAP）
+   + 20（头像 40 的中线）− 18（按钮 36 的一半），中线正好压在头像中线上。
+   （窄窗口那条媒体查询里操作栏会退回单独一行，那边另有一条把它改回去。） */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive).bili-elite-vb-multi #arc_toolbar_report {
+  align-self: start;
+  margin-top: 10px;
+}
+
+/* ===== 7. 简介灰卡（播放数据 + 简介合一张）=====
+   播放数据（`.video-info-meta`）**不搬 DOM**，靠栅格叠一层：`#viewbox_report` 改成
+   display: contents 之后它就是左栏的 grid item，把它也放进第 4 行（和简介卡同一格），
+   它就落在卡片顶部那块留白里（卡片 padding-top 44 = 12 上内边距 + 24 统计行 + 8 间隙）。
+
+   为什么不学 UP 主卡片那样真搬：简介这块是 Vue 高频重渲染的区域（展开 / 收起、换 P、
+   字幕作者列表后到），往 #v_desc 的 children 里插节点会让 Vue 的「按索引 patch」错位 ——
+   轻则播放数据那一行被当成简介节点改写，重则简介正文被塞进播放数据里。
+   CSS 叠一层，Vue 的 children 数组一个字节都没动，它怎么重渲染都不会坏。
+
+   底色用 B 站自己的 --graph_bg_thin（浅色 #F6F7F8 / 夜间自动转深），别写死 #F0F5FF ——
+   参考稿那张卡带一点蓝调，但夜间模式下浅蓝底会把整块文字压得没法读。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) #v_desc {
+  grid-row: 4;
+  grid-column: 1 / -1;
+  box-sizing: border-box;
+  /* 和 UP 主那一行的间距 = 占位里的 6px（见 §6 的 ::before）+ 这里的 8px，v019 从 24 收到 14 */
+  margin: 8px 0 0 !important;
+  /* 44 = 12（卡片自身到播放数据）+ 24（播放数据那一行）+ 8；话题串折行时这行会变高，
+     videoBeta.ts 把量到的值写进 --bili-vb-desc-top（兜底还是 44） */
+  padding: var(--bili-vb-desc-top, 44px) 16px 14px !important;
+  border-radius: var(--bili-radius-lg);
+  background: var(--graph_bg_thin, #f6f7f8);
+}
+
+/* 播放数据：和简介卡同一格，压在卡片顶部（z-index 把它抬到卡片背景之上）。
+   margin 让它正好落进卡片的上内边距里（见下一行）；高度写死 24 —— 让它自己长高就会压到简介正文上。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) .video-info-meta {
+  grid-row: 4;
+  grid-column: 1 / -1;
+  align-self: start;
+  position: relative;
+  z-index: 1;
+  /* 高度**不能写死**（v018）：后面接了话题串，标签多了会折行，一写死就压到简介正文上。
+     卡片的上内边距由 videoBeta.ts 按这里的高度写进 `--bili-vb-desc-top`，跟着一起长。 */
+  height: auto !important;
+  min-height: 24px;
+  /* 26 = 简介卡的 margin-top 14 + 卡片 padding-top 12；左边 16 就是卡片的 padding-left */
+  margin: 26px 16px 0 !important;
+}
+
+/* 卡片里空间紧，图标从 20 收到 16、字收到 12（参考稿的播放数据也是小一号的） */
+html.bili-elite-video-beta .video-info-meta .video-info-detail-list {
+  font-size: 12px;
+  /* 播放数据 + 话题串一行排不下时折行，别让标签顶出卡片。
+     B 站给这一行写了 overflow: hidden + 固定高度，折行的第二行会被**裁掉**
+     （窄窗口实测：话题串 x 掉到下一行、这一行的高度还是 24，标签直接看不见）。
+     这里放开高度和裁切，meta 跟着长高，卡片的上内边距由 --bili-vb-desc-top 追。 */
+  flex-wrap: wrap;
+  row-gap: 4px;
+  align-items: center;
+  height: auto !important;
+  overflow: visible;
+  align-self: flex-start;
+}
+
+html.bili-elite-video-beta .video-info-meta .video-info-detail-list .item {
+  margin-right: 14px;
+  font-size: 12px;
+}
+
+html.bili-elite-video-beta .video-info-meta .video-info-detail-list .item svg {
+  width: 16px !important;
+  height: 16px !important;
+  margin-right: 4px;
+}
+
+/* 7.1 原版「N 人正在看」挪到这一行的最右侧（v032）。
+
+   它原本在弹幕发送栏里（`.bpx-player-video-info`），beta 把发送栏搬进控制栏、又把这块人数
+   藏掉了（§9.2）—— 人数只剩播放器上那一份，滚到评论区就看不见了。
+   这里挂在 `.video-info-meta` 的 `::after` 上：meta 是 flex 行，`margin-left: auto` 直接贴右；
+   `.video-info-detail-list` 是它唯一的子项，会让出这块宽度（标签因此早一点点折行，可以接受）。
+   **不插节点**，理由同 §7：播放数据是 Vue 高频重渲染的区域，动 children 会踩坑。
+
+   - `content` 兜底写 `none`：没拿到人数时伪元素根本不生成，一个像素都不占；
+   - `align-self: flex-start`：meta 是 `align-items: center`，单行时文字会比播放数据低 3px；
+   - `flex: none` + `nowrap`：人数变长（8 → 1.2万）时不会被压扁；
+   - 只在**窗口态**生效，沉浸式整块交回 B 站（和 §7 其他规则一致）。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) .video-info-meta::after {
+  content: var(--bili-vb-watching, none);
+  flex: none;
+  align-self: flex-start;
+  margin-left: auto;
+  padding-left: 12px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text3);
+  white-space: nowrap;
+}
+
+/* 简介正文：卡片自己有 padding，正文别再自带外边距（B 站给了 8~12px） */
+html.bili-elite-video-beta #v_desc .basic-desc-info,
+html.bili-elite-video-beta #v_desc .desc-info {
+  margin: 0 !important;
+}
+
+/* 简介卡下面的互动卡（投票 / 评分…）。
+   B 站把它们挂在 #v_desc 后面当独立块，但**不给栅格行号**，于是走自动放置：
+   先排在简介卡下面（第 5 行），评论一加载完又被挤到评论下面去（第 7 行）——
+   用户截图里「简介卡片与投票卡片重合」就是这段：两张同色灰卡之间一点间距都没有
+   （grid 没有 row-gap，卡片自己也没有上外边距），圆角挨着圆角，看着像糊成一张。
+   这里把「除已知块以外的直接子元素」一律当互动卡处理：钉在第 5 行、补 10px 上间距，
+   资源块和评论依次顺延。没有互动卡时第 5 行是空的（高度 0），排版一个像素都不变。
+   `::before` 那个占位伪元素不是元素，不会被这条命中。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) .left-container > :not(#playerWrap):not(#viewbox_report):not(#arc_toolbar_report):not(#v_desc):not(#commentapp):not(.video-resource-list):not(.video-tag-container):not(.bgm-entry):not(.ad-report) {
+  grid-row: 5;
+  grid-column: 1 / -1;
+  margin-top: 10px !important;
+}
+
+/* 资源 / 素材块（只有部分稿件有，没有时这一行是空的、高度 0，评论自然上移） */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) .video-resource-list {
+  grid-row: 6;
+  grid-column: 1 / -1;
+}
+
+/* 简介卡 → 评论：B 站原本这两块之间**一点缝都没有**（grid 没有 row-gap，评论自己也没有
+   上外边距），灰卡的圆角直接贴着「评论」那一行的标题，看着像糊成一张。
+   补 10px —— 和「UP 主控件 ↔ 简介卡」是同一个数（videoBeta.ts 的 UP_GAP 是 8，
+   卡片下面那 10 由 §6 的 ::before 占位出），用户要的就是这两处对齐。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) #commentapp {
+  grid-row: 7;
+  grid-column: 1 / -1;
+  margin-top: 10px !important;
+}
+
+/* ===== 8. 窄窗口兜底：操作栏排不进 UP 主那一行 =====
+   操作栏里那几颗按钮是定宽的（4~6 颗 ≈ 496~706px），窗口一窄，UP 主那一列就只剩两三百像素，
+   名字会被截断。1120 以下让它退回单独一行（就是 B 站原本的上下结构），
+   后面的块整体下移一行。 */
+@media (max-width: 1120px) {
+  /* 这几个选择器必须和基础规则**同样带 `:not(.bili-elite-vb-immersive)`**：
+     v017 给基础规则加了这个 :not 之后特异性高了一档，媒体查询里没加，于是整条被压住、
+     窄窗口下操作栏还留在第 2 列（436px），第 1 列只剩一百多像素 —— UP 主卡片被挤成竖条。 */
+  html.bili-elite-video-beta:not(.bili-elite-vb-immersive) #arc_toolbar_report {
+    grid-row: 4;
+    grid-column: 1 / -1;
+    align-self: auto;
+    justify-content: flex-start;
+    margin-top: 10px;
+  }
+
+  /* 窄窗口下操作栏本来就退回单独一行（上面那条），§6.5 给多人卡片写的
+     「按顶边排 + 6px」在这里没有意义，改回居中那套，免得它贴着行顶。 */
+  html.bili-elite-video-beta:not(.bili-elite-vb-immersive).bili-elite-vb-multi #arc_toolbar_report {
+    align-self: auto;
+    margin-top: 10px;
+  }
+
+  /* 播放数据和简介卡是「叠在第 4 行」的一对，整体下移到第 5 行，别拆开 */
+  html.bili-elite-video-beta:not(.bili-elite-vb-immersive) .video-info-meta,
+  html.bili-elite-video-beta:not(.bili-elite-vb-immersive) #v_desc {
+    grid-row: 5;
+  }
+
+  /* 互动卡（投票 / 评分…）跟着整块下移一行，同样别拆开 */
+  html.bili-elite-video-beta:not(.bili-elite-vb-immersive) .left-container > :not(#playerWrap):not(#viewbox_report):not(#arc_toolbar_report):not(#v_desc):not(#commentapp):not(.video-resource-list):not(.video-tag-container):not(.bgm-entry):not(.ad-report) {
+    grid-row: 6;
+  }
+
+  html.bili-elite-video-beta:not(.bili-elite-vb-immersive) .video-resource-list {
+    grid-row: 7;
+  }
+
+  html.bili-elite-video-beta:not(.bili-elite-vb-immersive) #commentapp {
+    grid-row: 8;
+  }
+}
+
+/* ===== 9. 播放器下栏：把全屏那套搬到窗口态（长相同原版，尺寸按控制栏收一档）=====
+   窗口态 B 站在播放器**下面**挂一条 56px 的弹幕发送栏（`.bpx-player-sending-area`：
+   「N 人正在看」+ 弹幕开关 + 输入框 + 发送），播放器总高因此是「16:9 + 56」；
+   网页全屏 / 全屏没有这条 —— B 站把**同一个** `.bpx-player-sending-bar` 挪进控制栏中间
+   （`.bpx-player-control-bottom-center`），做成 729×34 的半透明一条（实测：输入条 645×34、
+   8px 圆角、rgba(255,255,255,.3)、弹幕礼仪 72px、发送键 64×34 蓝底 #00aeec）。
+
+   这里照全屏来：发送栏容器整条不占位（高度收回纯 16:9，见 videoBeta.ts 的 measure()），
+   发送栏本体由 videoBeta.ts 搬进控制栏中间。**外观逐条照抄原版，尺寸收一档**：
+   原版那条 34px 高，窗口态的控制栏只有 35px，顶满会顶到上下沿，所以 30px 高、
+   输入条最宽 560、发送键 56×30；圆角 / 0.3 白底 / 弹幕礼仪 / 蓝键都不动。
+
+   **网页全屏 / 全屏整块交回 B 站**（`bili-elite-vb-send-native`，见 playerMode.ts）：
+   那两种模式下 B 站自己就把 729×34 塞好了，尺寸正好，一条都不该覆盖。
+   以前这几条没加 :not()，全屏也被压成 28px —— 发送键 34 高、条 28 高，键上下都露在外面
+   （用户截图「发送弹幕控件和原版不一样」就是这个）。 */
+
+html.bili-elite-video-beta .bpx-player-sending-area {
+  display: none !important;
+}
+
+/* 占位骨架下面那截灰条同样不要（它等的就是发送栏） */
+html.bili-elite-video-beta #bilibili-player-placeholder-bottom {
+  display: none !important;
+}
+
+/* 9.1 控制栏拉成「左 / 中 / 右」三等分。
+   B 站原本左 136、右 388，中间那块因此天然偏左 126px —— 发送条跟着偏，看着就不在画面中间。
+   三块都 flex:1 1 0（min-width 留 auto）：宽窗口下各占 1/3，中间那块正好落在播放器中线；
+   窗口一窄，左右两块按自己的内容撑住、中间那块跟着缩，永远盖不到按钮上。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-send-native) .bpx-player-control-bottom-left,
+html.bili-elite-video-beta:not(.bili-elite-vb-send-native) .bpx-player-control-bottom-center,
+html.bili-elite-video-beta:not(.bili-elite-vb-send-native) .bpx-player-control-bottom-right {
+  flex: 1 1 0 !important;
+}
+
+/* 中间那块：原版是 display:block + 固定 34px 高，窗口态改成 flex 居中，高度跟着控制栏走。
+   min-width: 0 让它在窄窗口下能缩（不加就按发送条的 560 撑住，把左右两块挤出去）。
+   display / flex 都加 !important —— 播放器尺寸一变（比如刚退出网页全屏）B 站会把这几条
+   收回去，那时发送栏就「被挤没」了：栏还在控制栏里，但中间那块 0 宽 0 高。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-send-native) .bpx-player-control-bottom-center {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 0 !important;
+  height: auto !important;
+  padding: 0 !important;
+  line-height: normal !important;
+}
+
+/* 发送栏本体：透明底 + 撑满中间那块（30px，跟 35px 的控制栏留 2px 上下呼吸） */
+html.bili-elite-video-beta:not(.bili-elite-vb-send-native) .bpx-player-control-bottom-center .bpx-player-sending-bar {
+  display: flex !important;
+  /* 下面那条 @container 要按「条子自己的宽度」判断放不放得下弹幕礼仪 */
+  container-type: inline-size;
+  box-sizing: border-box;
+  width: 100% !important;
+  max-width: 560px !important;
+  height: 30px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  align-items: center;
+  line-height: 30px !important;
+  background: transparent;
+  /* 整条往上抬 6px（v029）。两个理由：
+     1. 居中排（控制栏 35 / 条子 30 -> 上下各 2.5）离播放器下沿太近，看着贴底；
+     2. 控制栏右侧那排控件（清晰度 / 倍速 / 字幕…）是 22px 高、贴着控制栏顶边排的，
+        视觉中线在「控制栏顶 + 11」；条子居中时中线在「顶 + 17.5」，左边的弹幕开关
+        就比右边那排低 6.5px（用户截图里两颗图标明显偏下）。
+     抬 6px 之后：条子底距播放器下沿 8.5px，开关图标中心 427.5 对上右侧控件的 427。
+     用 translate 不用 margin —— 不动布局，控制栏那 35px 的高度一个字节都不变。
+     抬完条子顶边会进到控制栏上方那 9px 空白里（进度条在再往上 10px 处），不会压到进度条。 */
+  translate: 0 -6px;
+}
+
+/* 全屏态把「N 人正在看」藏掉，这里同样 */
+html.bili-elite-video-beta:not(.bili-elite-vb-send-native) .bpx-player-control-bottom-center .bpx-player-sending-bar .bpx-player-video-info {
+  display: none !important;
+}
+
+/* 弹幕开关 / 弹幕设置两颗图标跟着变白（视频画面是深的，灰的看不清），间距用原版的 18px。
+   只改 fill —— 它们靠 fill 上色，动 color 会连带影响里面的复选框。
+   flex:none 是必须的：条子窄下来时它们会被压扁（实测 24 → 17，图标变形）。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-send-native) .bpx-player-control-bottom-center .bpx-player-dm-switch,
+html.bili-elite-video-beta:not(.bili-elite-vb-send-native) .bpx-player-control-bottom-center .bpx-player-dm-setting {
+  flex: none !important;
+  fill: rgba(255, 255, 255, 0.9);
+}
+
+/* 输入条：半透明白底 + 8px 圆角（原版就是这个数，别改成胶囊） */
+html.bili-elite-video-beta:not(.bili-elite-vb-send-native) .bpx-player-control-bottom-center .bpx-player-video-inputbar {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 30px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border-radius: 8px !important;
+  background: rgba(255, 255, 255, 0.3) !important;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+html.bili-elite-video-beta:not(.bili-elite-vb-send-native) .bpx-player-control-bottom-center .bpx-player-video-inputbar-wrap {
+  height: 30px !important;
+  border: none !important;
+  border-radius: 8px 0 0 8px !important;
+}
+
+/* 输入框左边那颗「弹幕类型」小图标（原版 30×34，这里按 30px 的条等比收） */
+html.bili-elite-video-beta:not(.bili-elite-vb-send-native) .bpx-player-control-bottom-center .bpx-player-video-btn-dm {
+  flex: none;
+  width: 26px !important;
+  height: 30px !important;
+  padding: 3px 0 !important;
+  margin: 0 !important;
+  color: #fff;
+}
+
+/* 输入框里的字 13px（B 站 14px，压进 30px 的条里会顶到上下沿）；宽度交给它自己伸缩，
+   条子窄的时候先收输入框，别去挤图标和发送键 */
+html.bili-elite-video-beta:not(.bili-elite-vb-send-native) .bpx-player-control-bottom-center .bpx-player-dm-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 30px !important;
+  line-height: 30px !important;
+  padding: 0 5px !important;
+  font-size: 13px !important;
+  color: #fff !important;
+}
+
+html.bili-elite-video-beta:not(.bili-elite-vb-send-native) .bpx-player-control-bottom-center .bpx-player-dm-input::placeholder {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* 「弹幕礼仪 >」原版是全屏态才有的（窗口态那条 56px 的栏里也有，我们搬过来时留着了）。
+   它是链接、不可压缩，条子窄到 340px 以下（输入框已经装不下那 11 个字的占位符了）
+   就整条让出去，给输入框腾地方 */
+html.bili-elite-video-beta:not(.bili-elite-vb-send-native) .bpx-player-control-bottom-center .bpx-player-dm-hint {
+  display: flex !important;
+  flex: none;
+  overflow: hidden;
+  height: 30px !important;
+  line-height: 30px !important;
+  margin: 0 6px 0 0 !important;
+  font-size: 13px !important;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.5) !important;
+}
+
+@container (max-width: 340px) {
+  html.bili-elite-video-beta:not(.bili-elite-vb-send-native) .bpx-player-control-bottom-center .bpx-player-dm-hint {
+    display: none !important;
+  }
+}
+
+/* 发送键：56×30 的小胶囊（原版 64×34，min-width 也是 B 站写死的 62 —— 必须 !important
+   才压得住，不然它比条子还高）。圆角只留右边，跟输入条的 8px 对齐。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-send-native) .bpx-player-control-bottom-center .bpx-player-dm-btn-send {
+  flex: none !important;
+  width: 56px !important;
+  min-width: 56px !important;
+  height: 30px !important;
+  margin: 0 !important;
+  border-radius: 0 8px 8px 0 !important;
+  line-height: 30px !important;
+  font-size: 13px !important;
+  color: #fff !important;
+}
+
+/* 蓝色底在子节点上（.bui-area.bui-button-blue，原版 #00aeec），圆角要跟着一起改 */
+html.bili-elite-video-beta:not(.bili-elite-vb-send-native) .bpx-player-control-bottom-center .bpx-player-dm-btn-send .bui-area {
+  border-radius: 0 8px 8px 0 !important;
+}
+
+/* ===== 10. 沉浸式（宽屏 / 网页全屏 / 全屏）：信息区整套交回 B 站 =====
+   上面所有布局规则都带 `:not(.bili-elite-vb-immersive)`，这里只补两条「不能出现」的东西：
+   话题串（真链接那一版是 DOM 节点，靠 CSS 收起来，不去删 —— 删节点是水合期的雷）。 */
+html.bili-elite-video-beta.bili-elite-vb-immersive .bili-elite-vb-topics {
+  display: none !important;
+}
+
+/* ===== 11. 简介卡：没有简介也要有卡片 / 收起态可点 =====
+   两件事，都只是「加料」—— **收起 / 展开本身完全交给 B 站**：
+
+   1. **没有简介的稿件**（实测 BV1xdx56HEFA）：B 站给 `#v_desc` 写了行内 `display:none`，
+      `.basic-desc-info` 是空的 —— 于是整张灰卡消失，播放数据那一行裸在外面（用户截图）。
+      这里强制画出来，正文位置放一个 `~` 占位。
+
+   2. **收起态**（`html.bili-elite-vb-desc-folded`，由 videoBeta.ts 读 B 站自己的行内 height 挂）：
+      整张卡可点、鼠标移上去高亮。点下去由 videoBeta.ts 转交给 B 站原生的 `.toggle-btn` ——
+      所以「展开更多 / 收起」还是简介左下角那颗原版按钮，文案、阈值（3.5 行）、高度都由 B 站维护。
+
+   **别在这里写 max-height / height**：v018 曾经用 `max-height` 把正文压到 2 行，而 B 站
+   `checkIfDescInfoCanBeFolded` 量的就是 `getBoundingClientRect().height` —— 被压成 52px 之后
+   它判定「不需要折叠」，原版「展开更多」按钮直接不渲染。用户报的「原版展开按钮被删了」就是这条。
+
+   状态类挂在 `<html>` 上而不是 `#v_desc` 上：Vue 换掉那个节点时类不会丢。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive).bili-elite-vb-nodesc #v_desc {
+  display: block !important;
+}
+
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive).bili-elite-vb-nodesc #v_desc::before {
+  content: '~';
+  display: block;
+  font-size: 14px;
+  line-height: 26px;
+  color: var(--text3);
+}
+
+/* 11.1 正文整段都装得下 → 不需要「展开更多」（`html.bili-elite-vb-desc-fit`，判定在 videoBeta.ts
+   的 needDescFit 里）。
+
+   大窗口下正文只有两三行，B 站却还按「3.5 行」写死行内 height —— 收起态就已经把全文露出来了，
+   那颗「展开更多」点下去只会让卡片矮一截（用户报的「点开反而收起了一些」）。这里把行内高度
+   放开、按钮藏掉。
+
+   **这条 `height: auto` 和 §11 开头警告的 `max-height` 不是一回事**：B 站
+   `checkIfDescInfoCanBeFolded` 量的是渲染高度，我们只会让它「变高到自然高度」—— 那种情况下
+   B 站本来就该判「不需要折叠」。真正要避免的是把正文**压矮**（v018 那次把按钮压没了）。
+   判据也刻意不读 clientHeight（那会被这条规则影响），只用行内 px + scrollHeight。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive).bili-elite-vb-desc-fit #v_desc .basic-desc-info {
+  height: auto !important;
+}
+
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive).bili-elite-vb-desc-fit #v_desc > .toggle-btn {
+  display: none !important;
+}
+
+/* 11.2 「展开更多 / 收起」按钮的点击涟漪（1.2.5 v029）：
+   按钮本体仍是 B 站的（文案 / 阈值 / 行内高度都归它管，见 §11 开头），这里只加
+   涟漪宿主要的三样：定位锚、裁切、内容压在波纹之上（isolation + z -1）。
+   灰底卡片上 currentColor（灰字）的波纹看不出来，波纹色固定用 B 站品牌蓝。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive) #v_desc > .toggle-btn {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  --blie-ripple-z: -1;
+  --blie-ripple-color: #00aeec;
+}
+
+/* 收起态 = 可点：指针 + 悬停高亮（展开态不挂这两条，所以不会高亮） */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive).bili-elite-vb-desc-folded #v_desc {
+  cursor: pointer;
+  transition: background-color var(--bili-dur-fast) var(--bili-ease);
+}
+
+/* 播放数据那一行（播放量 / 日期 / #话题）是卡片的**兄弟**、叠在卡片顶部（§7），
+   它自己不是 #v_desc —— 悬停它不会触发 `#v_desc:hover`，用户看到的就是
+   「鼠标停在 #标签那一行不高亮」。从共同祖先 `.left-container` 用 `:has()` 兜住。
+   注意 `#viewbox_report` 是 `display: contents`，meta 在 **DOM** 上仍然是它的子节点，
+   所以这里只能写后代选择器，不能写 `>`。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive).bili-elite-vb-desc-folded .left-container:has(.video-info-meta:hover) #v_desc,
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive).bili-elite-vb-desc-folded #v_desc:hover {
+  background: var(--bili-vb-desc-hover);
+}
+
+/* 那一行整块也算「点卡片」（videoBeta.ts 的 onDescClick 里 meta 命中同样展开），指针跟上；
+   里面的 #话题 是 <a>，它自己就是 pointer，不受影响。 */
+html.bili-elite-video-beta:not(.bili-elite-vb-immersive).bili-elite-vb-desc-folded .video-info-meta {
+  cursor: pointer;
+}
+
+/* 窄窗口：控制栏本来就挤，两侧 40px 的内边距收掉 */
+@media (max-width: 1200px) {
+  html.bili-elite-video-beta .bpx-player-control-bottom-center {
+    padding: 0 12px !important;
+  }
+}
+
+/* ===== 12. 视频页半顶栏（1.1.6 v011） =====
+   `html.bili-elite-vb-half` 由 videoBeta.ts 挂上（要求「顶栏优化 + 播放页优化 + 视频页半顶栏」
+   三个开关全开，见 ROOT_HALF 的注释）。顶栏自己那半边在 selfTopbar.css §8，这里只管
+   **播放页的几何**：
+
+   1. 左栏整体上移 —— 顶栏不再占左上方那一条，播放器顶到窗口最上面。
+      **上移量 = 整个顶栏高 64px**（`--bili-vb-half-shift`，由 measure() 写）：上方那 10px
+      空隙不从这里扣，它由 §1 的 padding-top 提供（**只有半顶栏才有这道白边**，1.2.1 起
+      非半顶栏是 0 —— 那时顶栏还在，再留就是一条缝）。
+      一点不留的话播放器第一行像素会跟窗口边框咬在一起，看着像被切了一刀。
+   2. 左栏的 sticky top 换成「最多钉到视口顶 + 上方空隙」—— B 站写的是「最多钉到顶栏下沿（64）」，
+      左栏比视口矮的稿件（评论少）那条会把刚上移的左栏又推回 64px，等于白移。
+      值由 videoBeta.ts 的 leftPinTop 算好写进 `--bili-vb-left-top`，这里只是强制用它。
+
+   为什么用 margin-top 而不是 translate：translate 会让左栏变成后代 absolute / fixed 的
+   包含块（播放器内部一堆绝对定位），margin-top 只动位置。`#mirror-vdcon` 的 overflow 是
+   visible（实测），上移不会被裁。
+   只在窗口态生效：沉浸式（宽屏 / 网页全屏 / 全屏）整块交回 B 站。 */
+html.bili-elite-vb-half:not(.bili-elite-vb-immersive) .left-container {
+  margin-top: calc(-1 * var(--bili-vb-half-shift, 64px)) !important;
+}
+
+html.bili-elite-vb-half:not(.bili-elite-vb-immersive) .left-container.scroll-sticky {
+  top: var(--bili-vb-left-top, 10px) !important;
+}
+
+
+/* ===== 10. 首帧前的封面兜底 =====
+   背景见 videoBeta.ts 的 ROOT_POSTER 那段注释。三个关键点：
+   1. 宿主是 `.bpx-player-container`（实测 position: relative、盒子正好等于播放器），
+      **不是 #mirror-vdcon** —— 那边一个节点都不插，伪元素挂在播放器自己的容器上更安全。
+   2. `z-index: 1` 是量出来的：视频在 `.bpx-player-video-area`（relative + z-index auto，
+      属于「定位元素 z-index auto」那一层），伪元素给 1 才盖得住它；而控制栏
+      `.bpx-player-control-wrap` 是 z-index **75**，鼠标划过来时控件照样在封面之上。
+   3. `pointer-events: none`：封面只是一张图，不能吃掉播放器的点击（点一下要能起播）。
+   `--bili-vb-poster` 由 videoBeta.ts 写在 <html> 上，class 摘掉就整块消失。 */
+html.bili-elite-vb-poster .bpx-player-container::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: var(--bili-vb-poster) center / cover no-repeat;
+}
+
+/* ===== 13. 评论预加载（1.2.1 v006） =====
+   B 站的 <bili-comments> 带 lazy-load：组件自己用 IntersectionObserver 观察自己，
+   1px 进入视口才发第一页请求（`/x/v2/reply/wbi/main`，实测滚到评论区才发）。那个接口
+   的响应是 no-cache，我们替它取回来的那份它不认 —— 所以「预加载」唯一有效的做法是
+   **让它真的进入一次视口**：整块 translateY 到视口顶部、透明掉，让那个 IO 判定「可见」，
+   第一页开始下载；下载完（区块长高）由 commentPreload.ts 立刻复位。
+
+   为什么用 transform 而不是 position: fixed —— 它是 `.left-container` 栅格里的一格，
+   transform 不改布局：页面高度、滚动条、其它块的位置一个像素都不动。fixed 会让这一格
+   塌陷（未加载时 154px），复位时又长回来，滚动条要抖两下。
+
+   位移量 `--bili-vb-cp-shift` 由 commentPreload.ts 按「评论区顶边到视口顶的距离」写。
+   `opacity` / `pointer-events`：位移后它正好盖在播放器上，必须看不见、点不着（点击要
+   穿透到视频上，不挡播放器操作）。opacity **不影响** IntersectionObserver 的判定 ——
+   它只看几何，不看画没画出来。
+
+   整段挂在 `html.bili-elite-video-beta` 上：播放页优化关掉时这条一起失效（面板里那一行
+   也会变灰，见 features.ts 的 under）。 */
+html.bili-elite-video-beta.bili-elite-vb-cp #commentapp {
+  transform: translateY(var(--bili-vb-cp-shift, 0px)) !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* ===== 嵌入模式：被「动态悬浮窗」嵌进来的视频页（见 videoBeta.ts 的 isEmbedMode） =====
+   悬浮窗最宽 2200：右栏推荐列表在这里纯属噪音，整条收掉、左栏吃满（rail 由 measure 写成 0）；
+   顶栏 / 背景 / 侧栏也一并藏掉 —— iframe 里再出现一条 B 站顶栏就是两层壳。
+   注意左栏 sticky 的 top **不用在这里覆盖**：嵌入模式不挂 ROOT_HALF，走的就是
+   §2 那条 `:not(.bili-elite-vb-half)` 规则，值由 leftPinTop 按「没有顶栏」算成 EDGE。 */
+html.bili-elite-vb-embed #bili-header-container,
+html.bili-elite-vb-embed #biliMainHeader,
+html.bili-elite-vb-embed .bili-header,
+html.bili-elite-vb-embed .z-top-container,
+html.bili-elite-vb-embed .bgc,
+html.bili-elite-vb-embed .bg,
+html.bili-elite-vb-embed .side-toolbar,
+html.bili-elite-vb-embed .right-sidebar-wrap,
+html.bili-elite-vb-embed .bili-dyn-sidebar,
+/* 右侧那组竖排浮钮（小窗 / 客服 / 回到顶部）：2200 宽的窗口里正好压在内容右边缘上 */
+html.bili-elite-vb-embed .fixed-sidenav-storage,
+html.bili-elite-vb-embed .bili-fixed-sidenav,
+html.bili-elite-vb-embed .ad-report {
+  display: none !important;
+}
+
+/* **右栏不能整条 `display: none`**：UP 主卡片还在右栏的流里，靠 CSS `translate` 挪到左栏
+   （见 §6 的「不搬 DOM」）。整条藏掉会把它一起藏了 —— 表现就是「视频下面没有 UP 主那一行」。
+   这里把右栏压成 0 宽、不占位置，只留 UP 卡溢出可见（它自己的宽度由 `--bili-vb-up-w` 给），
+   右栏里的合集卡 / 分类条 / 推荐列表逐个收掉。 */
+html.bili-elite-vb-embed .right-container,
+html.bili-elite-vb-embed .right-container-inner {
+  width: 0 !important;
+  min-width: 0 !important;
+  margin-left: 0 !important;
+  overflow: visible !important;
+}
+
+html.bili-elite-vb-embed .right-container-inner > :not(.up-panel-container) {
+  display: none !important;
+}
+
+/* 顶栏那 64px 的占位在嵌入模式里没有意义（顶栏本身被上面那条藏了） */
+html.bili-elite-vb-embed body {
+  padding-top: 0 !important;
+}
+
+/* ===== 13b. 嵌入模式禁用滚动小窗（1.2.4 v025） =====
+   悬浮窗里播放器是钉住的（单栏 sticky / 两栏 fixed），往下滚评论时它根本不会离开视口，
+   但 B 站的小窗逻辑按「滚过播放器」判 —— 滚下去照样把容器切成 `data-screen="mini"`：
+   容器变 fixed 钉到右下角 320×180（内联 right/bottom + 样式表给 position / 尺寸），
+   `#playerWrap` 原地留一块黑洞，播放器里只剩小窗专属的关闭钮 / 进度条。
+
+   嵌入模式里这套小窗没有意义（视频本来就没滑走），整条按 normal 态还原：
+   · 容器钉回原位 —— position / inset / 尺寸 / z-index 全部照 normal 态的 computed 值，
+     `!important` 能压过 B 站写的内联 right/bottom；
+   · 小窗专属控件（mini-warp：关闭钮 / 播放态 / 进度条 / 拖拽把手）藏掉；
+   · 被 `[data-screen="mini"]` 连带藏掉的正牌 UI 逐个还给 normal 态 —— 下面每个 display
+     值都是 2026-11-22 在真实播放页对 normal / mini 两种状态量出来对比的（mini 态少了
+     这些，不还原就会出现「画面回来了但控制条 / 弹幕全没了」）。
+   DOM 一个节点不动；滚回顶部 B 站自己把 data-screen 切回 normal、清掉内联样式，本节随之
+   失效。进全屏 / 网页全屏时 data-screen 是 web / full，本节本来就不匹配。 */
+html.bili-elite-vb-embed:not(.bili-elite-vb-immersive) .bpx-player-container[data-screen='mini'] {
+  position: relative !important;
+  top: 0 !important;
+  right: auto !important;
+  bottom: auto !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  z-index: auto !important;
+  transition: none !important;
+}
+
+/* 小窗专属控件 */
+html.bili-elite-vb-embed:not(.bili-elite-vb-immersive) .bpx-player-container[data-screen='mini'] .bpx-player-mini-warp,
+html.bili-elite-vb-embed:not(.bili-elite-vb-immersive) .bpx-player-container[data-screen='mini'] .bpx-player-mini-resizer {
+  display: none !important;
+}
+
+/* 被小窗态藏掉的正牌 UI：数值是 normal 态的 display */
+html.bili-elite-vb-embed:not(.bili-elite-vb-immersive) .bpx-player-container[data-screen='mini'] .bpx-player-top-wrap,
+html.bili-elite-vb-embed:not(.bili-elite-vb-immersive) .bpx-player-container[data-screen='mini'] .bpx-player-cmd-dm-wrap {
+  display: flex !important;
+}
+
+html.bili-elite-vb-embed:not(.bili-elite-vb-immersive) .bpx-player-container[data-screen='mini'] .bpx-player-follow {
+  display: inline-flex !important;
+}
+
+html.bili-elite-vb-embed:not(.bili-elite-vb-immersive) .bpx-player-container[data-screen='mini'] .bpx-player-control-entity,
+html.bili-elite-vb-embed:not(.bili-elite-vb-immersive) .bpx-player-container[data-screen='mini'] .bpx-player-control-mask,
+html.bili-elite-vb-embed:not(.bili-elite-vb-immersive) .bpx-player-container[data-screen='mini'] .bpx-player-control-wrap,
+html.bili-elite-vb-embed:not(.bili-elite-vb-immersive) .bpx-player-container[data-screen='mini'] .bpx-player-ending-panel,
+html.bili-elite-vb-embed:not(.bili-elite-vb-immersive) .bpx-player-container[data-screen='mini'] .bpx-player-ending-wrap,
+html.bili-elite-vb-embed:not(.bili-elite-vb-immersive) .bpx-player-container[data-screen='mini'] .bpx-player-music-wrap,
+html.bili-elite-vb-embed:not(.bili-elite-vb-immersive) .bpx-player-container[data-screen='mini'] .bpx-player-sending-area,
+html.bili-elite-vb-embed:not(.bili-elite-vb-immersive) .bpx-player-container[data-screen='mini'] .bpx-player-share-panel,
+html.bili-elite-vb-embed:not(.bili-elite-vb-immersive) .bpx-player-container[data-screen='mini'] .bpx-player-state-play,
+html.bili-elite-vb-embed:not(.bili-elite-vb-immersive) .bpx-player-container[data-screen='mini'] .bpx-player-state-wrap,
+html.bili-elite-vb-embed:not(.bili-elite-vb-immersive) .bpx-player-container[data-screen='mini'] .bpx-player-toast-wrap,
+html.bili-elite-vb-embed:not(.bili-elite-vb-immersive) .bpx-player-container[data-screen='mini'] .bpx-player-top-issue,
+html.bili-elite-vb-embed:not(.bili-elite-vb-immersive) .bpx-player-container[data-screen='mini'] .bpx-player-top-left-music {
+  display: block !important;
+}
+
+/* ===== 14. 嵌入模式 + 宽度足够：左播放器 / 右信息 两栏 =====
+   由 videoBeta.ts 的 measure() 挂 `.bili-elite-vb-embed-split`。判据见 computeEmbedSplit：
+   去掉两侧留白、播放器与信息栏之间的间距、以及信息栏最小宽度之后，左边还放得下
+   `SPLIT_VIDEO_MIN` 宽的 16:9 播放器。
+
+   **不改 DOM**：
+   · `#playerWrap` 改成 `position: fixed`，钉在 iframe 视口左上角 —— 页面滚信息栏时播放器不动；
+   · `.left-container` 仍在原来的流里，只把 `padding-left` 撑成「播放器宽 + 间距」，
+     标题 / UP / 操作栏 / 简介 / 评论整体右移，成为右栏；
+   · UP 主卡片仍在右栏的流里，靠 translate 横移到信息栏（见下面 .up-panel-container）。
+   这样播放器和信息栏是同一个文档里的两块，不需要第二个 iframe，也不会破坏 Vue 树。 */
+html.bili-elite-vb-embed.bili-elite-vb-embed-split:not(.bili-elite-vb-immersive) .left-container {
+  display: grid !important;
+  /* 单列：操作栏已经挪到单独一行（见下），信息栏不再需要「UP 卡 + 操作栏」两列 */
+  grid-template-columns: minmax(0, 1fr) !important;
+  box-sizing: border-box !important;
+  width: var(--bili-vb-left) !important;
+  padding-left: calc(var(--bili-vb-video-w) + var(--bili-vb-gap)) !important;
+  /* 播放器已经 fixed，左栏自己别再 sticky —— 否则整块信息栏会跟着页面钉住 / 漂移 */
+  position: static !important;
+  top: auto !important;
+  align-self: stretch !important;
+}
+
+html.bili-elite-vb-embed.bili-elite-vb-embed-split:not(.bili-elite-vb-immersive) #playerWrap {
+  position: fixed !important;
+  left: var(--bili-vb-gutter) !important;
+  top: var(--bili-vb-top-gap, 10px) !important;
+  width: var(--bili-vb-video-w) !important;
+  height: var(--bili-vb-video-h) !important;
+  z-index: 5 !important;
+}
+
+/* 播放器本体撑满外层；尺寸已经由 #playerWrap 按 16:9 算好 */
+html.bili-elite-vb-embed.bili-elite-vb-embed-split:not(.bili-elite-vb-immersive) #bilibili-player {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* 操作栏原来和 UP 卡同一行、占第 2 列。两栏后信息栏只有一列，必须给它单独一行，
+   否则会和 UP 卡占位叠在一起。后面几块依次下移一行（和窄窗口那条媒体查询的顺延一致）。
+   margin-top 10 也照抄窄窗口那条：占位给卡片下面留的 10px 里被卡片顶部的 8px 偏移
+   吃掉 8（UP_GAP），只剩 2 —— 再补 10，卡片和操作栏之间才有一道正常的缝。 */
+html.bili-elite-vb-embed.bili-elite-vb-embed-split:not(.bili-elite-vb-immersive) #arc_toolbar_report {
+  grid-row: 4 !important;
+  grid-column: 1 / -1 !important;
+  min-width: 0 !important;
+  align-self: start !important;
+  justify-content: flex-start !important;
+  margin-top: 10px !important;
+}
+
+/* 播放数据和简介卡仍叠在同一格（第 5 行），只是从单栏的第 4 行下移一行 */
+html.bili-elite-vb-embed.bili-elite-vb-embed-split:not(.bili-elite-vb-immersive) .video-info-meta,
+html.bili-elite-vb-embed.bili-elite-vb-embed-split:not(.bili-elite-vb-immersive) #v_desc {
+  grid-row: 5 !important;
+}
+
+/* 互动卡（投票 / 评分…）：原第 5 行 → 第 6 行 */
+html.bili-elite-vb-embed.bili-elite-vb-embed-split:not(.bili-elite-vb-immersive) .left-container > :not(#playerWrap):not(#viewbox_report):not(#arc_toolbar_report):not(#v_desc):not(#commentapp):not(.video-resource-list):not(.video-tag-container):not(.bgm-entry):not(.ad-report) {
+  grid-row: 6 !important;
+}
+
+html.bili-elite-vb-embed.bili-elite-vb-embed-split:not(.bili-elite-vb-immersive) .video-resource-list {
+  grid-row: 7 !important;
+}
+
+html.bili-elite-vb-embed.bili-elite-vb-embed-split:not(.bili-elite-vb-immersive) #commentapp {
+  grid-row: 8 !important;
+}
+
+/* 标签行 / 音乐入口在基础布局里是自动放置的（排在评论后面）。两栏后信息栏的第 1 行
+   空着（播放器 fixed 出流了），自动放置会把它们顶到标题上面 —— 显式排到评论后面。 */
+html.bili-elite-vb-embed.bili-elite-vb-embed-split:not(.bili-elite-vb-immersive) .video-tag-container,
+html.bili-elite-vb-embed.bili-elite-vb-embed-split:not(.bili-elite-vb-immersive) #bgm-entry {
+  grid-row: 9 !important;
+  grid-column: 1 / -1 !important;
+}
+
+/* UP 主卡片：仍在右栏的流里，靠 translate 横移到信息栏。
+   基准是基础布局那条 translate（-(left + gap)，把卡片从右栏挪到左栏左边缘）：
+   信息栏左边缘比左栏左边缘靠右「播放器宽 + gap」（padding-left），所以平移量多加这一截。
+   gap 抵消了：右栏左边缘 = 左栏左 + 左栏宽 + gap，信息栏左边缘 = 左栏左 + 播放器宽 + gap，
+   两式相减正好剩「播放器宽 − 左栏宽」。
+   两栏里不再需要 sticky：播放器 fixed 在左边，信息栏跟着页面滚，卡片自然跟着标题走。
+   margin-top 仍用 --bili-vb-up-y（相对左栏顶边），占位由 .left-container::before 第 3 行提供。 */
+html.bili-elite-vb-embed.bili-elite-vb-embed-split:not(.bili-elite-vb-immersive) .up-panel-container {
+  position: static !important;
+  top: auto !important;
+  width: var(--bili-vb-up-w, auto) !important;
+  translate: calc(-1 * (var(--bili-vb-left) - var(--bili-vb-video-w))) 0 !important;
+  margin-top: calc(var(--bili-vb-up-y, 0px) - var(--bili-vb-half-shift, 0px)) !important;
+  margin-bottom: 0 !important;
+}

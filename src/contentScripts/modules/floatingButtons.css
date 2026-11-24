@@ -7,12 +7,20 @@
   flex-direction: column;
   gap: 10px;
   align-items: center;
+  /* 「操作浮钮」收纳（界面优化 → 自动隐藏 / 半隐藏）：位移与透明度由 floatDock.ts
+     写在行内，这里只给时长与曲线 —— 用 translate 而不是 transform，免得和
+     .fab 的悬停放大抢同一个属性 */
+  transition:
+    translate var(--bili-dur-base) var(--bili-ease),
+    opacity var(--bili-dur-base) var(--bili-ease);
 }
 
 .fab {
   width: 44px;
   height: 44px;
   padding: 0;
+  /* 进度环是绝对定位的子元素，锚在这个盒子上 */
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -27,9 +35,9 @@
   /* 宿主整块是 pointer-events:none（空档不挡页面点击），只有按钮自己收事件 */
   pointer-events: auto;
   transition:
-    transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1),
-    box-shadow 0.22s ease,
-    background-color 0.22s ease;
+    transform var(--bili-dur-base) var(--bili-ease-spring),
+    box-shadow var(--bili-dur-base) var(--bili-ease),
+    background-color var(--bili-dur-base) var(--bili-ease);
   -webkit-tap-highlight-color: transparent;
 }
 .fab:hover {
@@ -42,10 +50,67 @@
 .fab:active { transform: scale(0.92); }
 .fab:focus-visible { outline: 2px solid rgba(10, 108, 255, 0.55); outline-offset: 2px; }
 
+/* ===== 夜间模式的整列配色 =====
+   夜间把三枚浮钮一起换成深色底 + 浅色图标（只换这一颗会在一列白圆里格外扎眼）。
+   底色和高铁那套顶栏 / 浮层一致（#202226），描边用 8% 白 —— 深底上阴影几乎看不见，
+   加一圈内描边才能把圆钮从页面里分出来。`.stack.is-night` 由 floatingButtons.ts 切。 */
+.stack.is-night .fab {
+  background: #202226;
+  color: rgba(255, 255, 255, 0.92);
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.46),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.stack.is-night .fab:hover {
+  background: #2A2D32;
+  box-shadow:
+    0 8px 22px rgba(0, 0, 0, 0.54),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+.stack.is-night .fab:focus-visible { outline-color: rgba(111, 176, 255, 0.72); }
+.stack.is-night .fab .ring circle { stroke: #6FB0FF; }
+
 /* 两个隐藏来源共用一条：开关关掉 / 返回顶部在页面顶部 */
 .fab.is-hidden { display: none; }
 
-.fab svg { width: 20px; height: 20px; display: block; }
+/* flex: 0 0 auto —— 胶囊态里文字比 44px 宽，图标会被 flex 压成 0 宽（第一版就踩了：
+   收起时圆键里只剩一个白圈，图标整个被挤没了）。图标和文字都不许收缩，
+   超出的部分由 .fab 的 overflow:hidden 裁掉。 */
+.fab svg { width: 20px; height: 20px; display: block; flex: 0 0 auto; }
+
+/* ===== 夜间模式浮钮：月亮 ↔ 太阳 =====
+   两枚 SVG 叠在同一个 20×20 的 `.fab-ic` 里，白天月亮、夜间太阳；切换时一个转出去、
+   一个转进来（透明度 + 反向旋转），而不是硬换图标。`.fab-ic` 参与 flex 排版，
+   所以胶囊态里它和文字的相对位置与其它键完全一致。 */
+.fab-ic {
+  position: relative;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  display: block;
+}
+.fab-ic svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transition:
+    opacity var(--bili-dur-fast) var(--bili-ease),
+    transform var(--bili-dur-slow) var(--bili-ease-spring);
+}
+.fab-ic .fab-ic-sun {
+  opacity: 0;
+  transform: rotate(-70deg) scale(0.5);
+}
+.stack.is-night .fab-ic .fab-ic-moon {
+  opacity: 0;
+  transform: rotate(70deg) scale(0.5);
+}
+.stack.is-night .fab-ic .fab-ic-sun {
+  opacity: 1;
+  color: #FFCF4D;
+  transform: none;
+}
+.fab-night { --open-w: 120px; }
 
 /* 点刷新时转一圈：一次性动画，转完就摘掉 class —— 不做常驻动画（每帧重绘） */
 .fab.is-spinning svg { animation: bili-elite-fab-spin 0.6s ease; }
@@ -58,4 +123,83 @@
 @media (prefers-reduced-motion: reduce) {
   .fab { transition: none; }
   .fab.is-spinning svg { animation: none; }
+}
+
+/* ===== 实验室 · 浮动键胶囊化 ===== */
+/* 悬停整列时两枚圆键一起向左展开成「图标 + 文字」的胶囊（整列右对齐，
+   所以宽度一撑开就是往左长）。文字本来就在 DOM 里，只是 display:none，
+   展开时才显出来 —— 不重建节点，也不需要 JS 参与。 */
+.stack.is-capsule .fab {
+  /* 圆态：图标仍然居中（44 - 12 - 20 = 12，左右对称） */
+  width: 44px;
+  padding-left: 12px;
+  justify-content: flex-start;
+  gap: 7px;
+  overflow: hidden;
+  transition:
+    width var(--bili-dur-base) var(--bili-ease-spring),
+    background-color var(--bili-dur-base) var(--bili-ease),
+    box-shadow var(--bili-dur-base) var(--bili-ease);
+}
+.stack.is-capsule:hover .fab {
+  width: var(--open-w, 108px);
+}
+/* 展开本身就是反馈，别再叠一层放大 */
+.stack.is-capsule .fab:hover { transform: none; }
+.stack.is-capsule .fab:active { transform: scale(0.96); }
+
+.fab-backtop { --open-w: 108px; }
+.fab-refresh { --open-w: 82px; }
+
+.fab-label {
+  display: none;
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  color: inherit;
+}
+.stack.is-capsule .fab-label {
+  display: block;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity var(--bili-dur-fast) var(--bili-ease) 0.05s, transform var(--bili-dur-fast) var(--bili-ease) 0.05s;
+}
+.stack.is-capsule:hover .fab-label {
+  opacity: 1;
+  transform: none;
+}
+
+/* ===== 实验室 · 返回顶部的滚动进度环 ===== */
+/* 点「返回顶部」时在按钮边缘画一圈进度：越接近顶部，环画得越少，到顶收掉。
+   dasharray 写满整圈，靠 dashoffset 从「整圈」往回退；周长与 ts 里的 RING_LEN 一致。 */
+.fab .ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 44px;
+  height: 44px;
+  transform: rotate(-90deg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--bili-dur-fast) var(--bili-ease);
+}
+.fab .ring circle {
+  fill: none;
+  stroke: #0A6CFF;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 131.95;
+  stroke-dashoffset: 131.95;
+}
+.fab.is-ringing .ring { opacity: 1; }
+
+/* 系统开了「减少动态效果」：胶囊化不做宽度补间，直接展开 / 收起。
+   这段必须写在这里而不是 designTokens.css —— 浮动键在 Shadow DOM 里，
+   页面级样式表够不着它。收纳的滑出 / 半隐藏同样直接到位。 */
+@media (prefers-reduced-motion: reduce) {
+  .fab { transition: none; }
+  .stack { transition: none; }
+  .fab-ic svg { transition: none; }
 }

@@ -1,7 +1,8 @@
 {
   "name": "bili-elite",
   "displayName": "奶睿pro",
-  "version": "1.0.2",
+  "version": "1.2.5",
+
   "private": true,
   "packageManager": "pnpm@9.7.1",
   "description": "B 站页面布局与视觉优化扩展：顶栏重做、全屏 / 图片开合动效、iOS 毛玻璃材质、搜索面板与首页信息流优化。",
@@ -19,6 +20,8 @@
     "build:js": "vite build --config vite.config.content.mts",
     "pack": "cross-env NODE_ENV=production run-p pack:*",
     "pack:zip": "rimraf extension.zip && jszip-cli add extension/* -o ./extension.zip",
+    "pack:edge": "node scripts/pack-edge.mjs",
+    "pack:src": "node scripts/pack-source.mjs",
     "pack:crx": "crx pack extension -o ./extension.crx",
     "pack:xpi": "cross-env WEB_EXT_ARTIFACTS_DIR=./ web-ext build --source-dir ./extension --filename extension.xpi --overwrite-dest",
     "start:chromium": "web-ext run --source-dir ./extension --target=chromium",

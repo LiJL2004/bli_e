@@ -1,0 +1,54 @@
+/**
+ * 盯住播放页真正下载的视频分片（`*.bilivideo.com`），每发现**一台新的主机**就回调一次。
+ *
+ * 为什么用 `PerformanceObserver` + `buffered: true` 而不是 `getEntriesByType`：资源条目默认
+ * 只留 250 条，播放页光分片就几百条，等想起来去读的时候早被挤出去了；`buffered` 还能把
+ * 「观察器挂上之前就已经发生」的那几条补回来。
+ *
+ * 为什么按主机去重：两个调用方（`netHints` 记「上次用到哪台」、`cdnOptimize` 拿一条样本
+ * 地址去探测）都只关心「有哪几台」，分片一秒好几条，不去重的话回调会被刷爆。
+ *
+ * 只给 URL，不给耗时/字节数 —— `*.bilivideo.com` 不带 `Timing-Allow-Origin`，跨域拿到的
+ * `transferSize` / `encodedBodySize` 全是 0，量不出速度（原因见 `shared/cdnScore.ts`）。
+ */
+
+export interface CdnSegment {
+  host: string
+  /** 这一台上的第一条分片地址（探测时可以只换主机名复用它的 path + query） */
+  url: string
+}
+
+const CDN_HOST_RE = /^[a-z0-9-]+\.bilivideo\.com$/
+
+export function watchCdnSegments(cb: (s: CdnSegment) => void): () => void {
+  const seen = new Set<string>()
+  let observer: PerformanceObserver | null = null
+  try {
+    observer = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        let host = ''
+        try {
+          host = new URL(entry.name).hostname
+        }
+        catch {
+          continue
+        }
+        if (!CDN_HOST_RE.test(host) || seen.has(host))
+          continue
+        seen.add(host)
+        try {
+          cb({ host, url: entry.name })
+        }
+        catch {}
+      }
+    })
+    observer.observe({ type: 'resource', buffered: true })
+  }
+  catch {
+    return () => {}
+  }
+  return () => {
+    observer?.disconnect()
+    observer = null
+  }
+}

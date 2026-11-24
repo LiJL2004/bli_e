@@ -1,0 +1,127 @@
+Bili_Elite / 奶睿pro — Third-Party Notices
+=========================================
+
+This browser extension is released under the MIT License (see LICENSE in the
+source repository: https://github.com/LiJL2004/bli_e).
+
+Parts of its visual parameters, interaction timing and component structure were
+ported from / referenced against the projects listed below. Their copyright and
+permission notices are reproduced in full at the end of this file, as required
+by the MIT License ("included in all copies or substantial portions").
+
+The full, item-by-item mapping (which control comes from where, and what we
+changed) is in THIRD-PARTY-NOTICES.md in the source repository:
+https://github.com/LiJL2004/bli_e/blob/main/THIRD-PARTY-NOTICES.md
+
+Sources
+-------
+
+1. BewlyBewly — https://github.com/BewlyBewly/BewlyBewly
+   Copyright (c) 2021 Hakadao. MIT License.
+   Used for: self-drawn top bar approach, top bar hover popovers and channel
+   panel, search bar focus animation with history / suggestion dropdown,
+   whole-card click and card hover fill, Dock auto-hide / half-hide behaviour,
+   back-to-top and refresh buttons.
+
+2. BewlyCat — https://github.com/keleus/BewlyCat
+   Copyright (c) 2025 Keleus. MIT License plus additional restrictions
+   (no repackaging into non-browser-extension forms). This extension is a
+   browser extension, so the additional terms are not triggered.
+   Used as the direct reference for the numeric values above.
+
+3. vitesse-webext — https://github.com/antfu-collective/vitesse-webext
+   Copyright (c) 2021 Anthony Fu. MIT License.
+   Used as the project template (manifest / build scripts / directory layout).
+
+
+--------------------------------------------------------------------------------
+A. BewlyBewly (MIT)
+--------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2021 Hakadao(hakadao2000@gmail.com)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+--------------------------------------------------------------------------------
+B. BewlyCat (MIT + additional restrictions)
+--------------------------------------------------------------------------------
+
+Custom License
+
+Copyright (c) 2025 Keleus <jen.hs@outlook.com>
+
+本项目在MIT协议的基础上：
+
+禁止将本项目或基于本项目修改、衍生的代码用于以下用途：
+
+1. 将本浏览器插件封装、转换、打包或集成为独立客户端、桌面应用、移动应用或其他非浏览器插件形态的软件；
+2. 以客户端、套壳客户端、桌面端、移动端 App 或类似形式发布、分发、传播或提供下载；
+3. 基于本项目代码开发、发布或分发与本项目功能实质相同或高度相似的客户端产品；
+---
+MIT License
+
+Copyright (c) 2021 Hakadao(hakadao2000@gmail.com)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+--------------------------------------------------------------------------------
+C. vitesse-webext (MIT)
+--------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2021 Anthony Fu
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

@@ -1,0 +1,143 @@
+/**
+ * 「CDN 优化」的后台半边：按分数表装一条 declarativeNetRequest 重定向规则，把视频分片
+ * 从「慢节点」导到「快节点」。
+ *
+ * 为什么在后台做：`declarativeNetRequest` 的动态规则只能由后台 / 扩展页面维护，
+ * 内容脚本没有这个 API。
+ *
+ * 规则长这样（假设 `upos-sz-mirrorcos` 实测最快）：
+ *
+ *   ^https://[a-z0-9-]+\.bilivideo\.com/(upgcxcode/.*)  →  https://upos-sz-mirrorcos.bilivideo.com/\1
+ *
+ * 几点必须守住的东西：
+ *
+ *   · **只在 `*.bilivideo.com` 内部换**。实测这类主机互相接受对方的 path + query
+ *     （签名不绑主机），而 akamai 那类主机换过去直接 403 —— 所以正则里写死了这个域，
+ *     别为了「更通用」把域名放宽。
+ *   · **只认点播分片的路径前缀 `upgcxcode/`**。同一个域下还有直播分片（`live-bvc/…`）、
+ *     封面图等等，把直播请求导到点播节点上大概率 403 —— 直播是另一套调度，不该被这条规则碰。
+ *   · **`excludedRequestDomains: [best]`**：否则已经在最快那台上的请求会被重定向到它
+ *     自己，白绕一圈（最坏情况还会被判成重定向环）。
+ *   · **开关关掉就删规则**：这是实验室功能，用户关掉之后一个字节都不该再改。
+ *   · 规则只有 1 条、id 固定，`updateDynamicRules` 用 `removeRuleIds` 先删再加，幂等。
+ *
+ * 装不上（权限被收、Chrome 拒绝这个条件组合）就静默放弃 —— 播放本身不受影响，
+ * 只是没优化而已，不值得为它报错打扰用户。
+ */
+
+import { CDN_SCORE_KEY, pickBest, readScores } from '~/shared/cdnScore'
+import { log } from '~/contentScripts/logger'
+import { STORAGE_KEY } from '~/shared/features'
+
+const RULE_ID = 1001
+const SETTINGS_KEY = STORAGE_KEY
+
+/** 扩展有没有拿到 declarativeNetRequest（拿不到就整个模块不工作，不是错误） */
+function hasDnr(): boolean {
+  return typeof chrome !== 'undefined' && !!chrome.declarativeNetRequest?.updateDynamicRules
+}
+
+async function isEnabled(): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.sync.get(SETTINGS_KEY, (raw: any) => {
+        const v = raw?.[SETTINGS_KEY]
+        resolve(!!(v && typeof v === 'object' && v.cdnOptimize))
+      })
+    }
+    catch {
+      resolve(false)
+    }
+  })
+}
+
+function escapeHost(host: string): string {
+  return host.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+async function clearRule() {
+  if (!hasDnr())
+    return
+  try {
+    await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: [RULE_ID] })
+  }
+  catch {}
+}
+
+async function sync() {
+  if (!hasDnr())
+    return
+  if (!(await isEnabled())) {
+    await clearRule()
+    return
+  }
+
+  const scores = await readScores()
+  const best = pickBest(scores)
+  if (!best) {
+    await clearRule()
+    return
+  }
+
+  const target = `https://${best}/\\1`
+  const condition = {
+    regexFilter: '^https://[a-z0-9-]+\\.bilivideo\\.com/(upgcxcode/.*)',
+    excludedRequestDomains: [best],
+    resourceTypes: ['xmlhttprequest', 'media', 'other', 'object'] as any,
+  }
+
+  try {
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: [RULE_ID],
+      addRules: [{ id: RULE_ID, priority: 1, action: { type: 'redirect', redirect: { regexSubstitution: target } }, condition } as any],
+    })
+    log('cdn rule on', best)
+  }
+  catch (err) {
+    // 条件组合被拒（不同版本校验规则不一样）：退一步只匹配「已知的、非最快」那几台。
+    // 覆盖面小一点，但一定合法。
+    const others = Object.keys(scores).filter(h => h !== best)
+    if (!others.length) {
+      await clearRule()
+      return
+    }
+    try {
+      await chrome.declarativeNetRequest.updateDynamicRules({
+        removeRuleIds: [RULE_ID],
+        addRules: [{
+          id: RULE_ID,
+          priority: 1,
+          action: { type: 'redirect', redirect: { regexSubstitution: target } },
+          condition: {
+            regexFilter: `^https://(?:${others.map(escapeHost).join('|')})/(upgcxcode/.*)`,
+            resourceTypes: ['xmlhttprequest', 'media', 'other', 'object'] as any,
+          },
+        } as any],
+      })
+      log('cdn rule on (fallback)', best)
+    }
+    catch (e2) {
+      log('cdn rule failed', String(err), String(e2))
+    }
+  }
+}
+
+/** 分数表 / 开关都可能连着变几次，攒一下再同步，别把 updateDynamicRules 打成连发 */
+let queued = 0
+function scheduleSync() {
+  clearTimeout(queued)
+  queued = setTimeout(() => { sync().catch(() => {}) }, 400) as unknown as number
+}
+
+chrome.storage.onChanged.addListener((changes: any, area: string) => {
+  if (area === 'local' && CDN_SCORE_KEY in changes)
+    scheduleSync()
+  if (area === 'sync' && SETTINGS_KEY in changes)
+    scheduleSync()
+})
+
+chrome.runtime.onStartup.addListener(() => { scheduleSync() })
+chrome.runtime.onInstalled.addListener(() => { scheduleSync() })
+
+// Service Worker 每次唤醒都对齐一次：规则存在浏览器里，但分数可能已经过期（换网络了）
+scheduleSync()

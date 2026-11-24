@@ -9,6 +9,8 @@
  * 监听 onChanged 实现跨标签页 / 跨页面同步。
  */
 
+import { registerSyncKey, syncSet } from '../storage'
+
 export interface NumberParamDef<K extends string = string> {
   key: K
   label: string
@@ -19,6 +21,14 @@ export interface NumberParamDef<K extends string = string> {
   fmt: (v: number) => string
   /** 可选：滑块下方的小字说明，用来解释这个数值代表什么 */
   hint?: string
+  /**
+   * 可选：胶囊上显示的不是原始值本身时（如「偏暗 6」），用它把原始值换算成
+   * 「用户看到的那个数字」，提交时再换回去 —— 保证点开输入框看到的就是胶囊上那个数。
+   */
+  edit?: {
+    to: (v: number) => number
+    from: (n: number) => number
+  }
 }
 
 export interface NumberParamStore<K extends string> {
@@ -29,6 +39,8 @@ export interface NumberParamStore<K extends string> {
   set: (key: K, value: number) => void
   /** 全部回到 defaults（「恢复默认设置」用），并写回存储 */
   reset: () => void
+  /** 只应用一份原始数据（统一存储分发时用，不读存储、不挂监听） */
+  apply: (raw: unknown) => void
   onChange: (cb: () => void) => () => void
   bootstrap: () => void
 }
@@ -75,11 +87,9 @@ export function createNumberParamStore<K extends string>(
   }
 
   function persist() {
-    const g: any = (globalThis as any).chrome
-    if (g?.storage?.sync) {
-      g.storage.sync.set({ [storageKey]: params })
+    // 扩展重载后 chrome.storage 会同步抛错，统一走 storage.ts 的入口（见 chromeApi）
+    if (syncSet({ [storageKey]: params }))
       return
-    }
     try {
       const raw = localStorage.getItem(storageKey)
       const cur = raw ? JSON.parse(raw) : {}
@@ -116,27 +126,19 @@ export function createNumberParamStore<K extends string>(
       notify()
   }
 
+  /**
+   * 只应用一份原始数据：不读存储、不挂监听。
+   * 读取由 storage.ts 统一发起（一次 get(null) + 一个 onChanged 分发给所有 store），
+   * 这里只负责「这份数据该怎么落到 params 上」。
+   */
+  function apply(raw: unknown) {
+    if (raw && typeof raw === 'object')
+      applyValues(raw as Partial<Record<K, number>>)
+  }
+
+  /** 登记到统一存储入口；真正的读取在 index.ts 的 startStorageSync() 里发起 */
   function bootstrap() {
-    const g: any = (globalThis as any).chrome
-    if (g?.storage?.sync) {
-      g.storage.sync.get(storageKey, (s: any) => {
-        applyValues((s && s[storageKey]) || {})
-      })
-      g.storage.onChanged.addListener((changes: any, ns: string) => {
-        if (ns !== 'sync' || !changes[storageKey])
-          return
-        applyValues(changes[storageKey].newValue || {})
-      })
-      return
-    }
-    try {
-      const raw = localStorage.getItem(storageKey)
-      if (raw)
-        applyValues(JSON.parse(raw))
-    }
-    catch {
-      /* noop */
-    }
+    registerSyncKey(storageKey, apply)
   }
 
   return {
@@ -152,6 +154,7 @@ export function createNumberParamStore<K extends string>(
         listeners.delete(cb)
       }
     },
+    apply,
     bootstrap,
   }
 }

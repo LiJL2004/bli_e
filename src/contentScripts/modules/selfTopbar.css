@@ -1,0 +1,1665 @@
+/*
+ * 「顶栏优化」：整条顶栏由扩展自绘（#bili-elite-tb），不再等 B 站那套 header 脚本。
+ *
+ * 由 selfTopbar.ts 在开关打开时注入到 <style id="bili-elite-tb-style">，开关关掉即移除。
+ * 所有规则都挂在 #bili-elite-tb / html.bili-elite-tb-on 下，关掉之后一个选择器都不命中。
+ *
+ * 尺寸照原生顶栏逐项量过（1584 视口）：
+ *   bar 1567×64；logo 起 24（首页 / 搜索页 / 播放页是 10，见 §1.1）；首页 x=120 宽 43；
+ *   动态 x=178 宽 28；搜索框 534,12 / 500×40（相对整条 bar 绝对居中）；
+ *   右侧图标 50 宽 × 5 个 + 投稿 90×34，右边缘落在 1543（= 1567 − 24；三种页面是 1557）。
+ *   改这里的数字前先对一遍 topbar.css §1.2.2 的顶栏壳，两者是同一套几何 ——
+ *   壳在开关关掉时顶上，自绘顶栏在开关打开时顶上，不该互相跳。
+ *
+ * 层级：1002，与原生顶栏 / 顶栏壳一致；设置面板（2147483647）永远在上面。
+ * 网页全屏 / 原生全屏下整条隐藏，见 topbar.css §13。
+ */
+
+/* ===== 1. 宿主与整条 bar ===== */
+#bili-elite-tb {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+  display: none;
+  box-sizing: border-box;
+  background: #fff;
+  color: #18191c;
+  z-index: 1002;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  line-height: 22.4px;
+  /* 整条**吃事件**（1.1.6 v011 改）：以前这里是 pointer-events: none，只有里面真正能点的
+     元素才吃事件 —— 于是顶栏那 64px 的空白处会把点击透传到下面的页面元素上（点在「空白」
+     却命中了底下的链接 / 卡片）。顶栏本来就是一条不透明（或毛玻璃）的实体栏，空白处也该
+     挡住。原生顶栏在文档流里就占着这 64px，页面内容不会藏在它下面，所以挡掉不亏。
+     半顶栏（§8）时宿主只剩右栏那一块，左边视频照旧可点。 */
+  pointer-events: auto;
+}
+html.bili-elite-tb-on #bili-elite-tb {
+  display: block;
+}
+/* [hidden] 必须真的隐藏：.tb-avatar / .tb-login 自己写了 display: flex，
+   会盖掉浏览器给 [hidden] 的 display: none —— 未登录时右边会多出一个灰色空圆 */
+#bili-elite-tb [hidden] {
+  display: none !important;
+}
+#bili-elite-tb .tb-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 24px;
+  box-sizing: border-box;
+}
+
+/* ===== 1.1 左右边距：与页面内容对齐（1.2.1） =====
+   首页 / 搜索页 / 播放页的内容区左右留白都是 `--bili-edge`（10px，1.2.0 v005 起的
+   「统一白边」）。顶栏这里原来写死 24px —— 那是 B 站原生顶栏自己的内边距，于是自绘顶栏的
+   logo 比第一列卡片多缩进 14px、右侧图标比卡片右边缘也少 14px，同一屏里一眼看得出没对齐。
+   这三种页面统一取同一个变量；其它页面（消息 / 空间 …）内容边距本来就不是 10，保持 24px。
+
+   动态页（t.bilibili.com）也归到这里（1.2.1 v002，用户要求）：它内容是居中三栏、
+   没有「一条边」可对，但顶栏是全局导航，跟视频页取同一个数更一致。
+
+   类 `bili-elite-tb-edge` 由 selfTopbar.ts 按 `location` 挂（document_start 就有，
+   不用 `:has()` 等 DOM 出现 —— 那会让边距晚一帧才对齐，首屏看得见一次横跳）。
+   半顶栏（§8）有自己的一套内边距，写在文件末尾、优先级相同 → 后写的赢，不会被这条盖掉。 */
+html.bili-elite-tb-edge #bili-elite-tb .tb-bar {
+  padding-left: var(--bili-edge, 10px);
+  padding-right: var(--bili-edge, 10px);
+}
+
+/* ===== 2. 左侧：logo + 首页 ∨ / 动态 ===== */
+#bili-elite-tb .tb-logo {
+  display: flex;
+  align-items: center;
+  width: 96px;
+  height: 100%;
+  flex: none;
+  text-decoration: none;
+  pointer-events: auto;
+}
+#bili-elite-tb .tb-logo .bili-elite-logo__mark {
+  width: 76px;
+  height: 34px;
+  background-color: #00aeec;
+  -webkit-mask: var(--bili-wordmark-mask) no-repeat center / contain;
+  mask: var(--bili-wordmark-mask) no-repeat center / contain;
+}
+/* 「奶睿顶栏图」：把字标换成奶睿形象，尺寸与原生顶栏那版一致（48×38、右移 8px） */
+html.bili-elite-mascot-logo #bili-elite-tb .tb-logo .bili-elite-logo__mark {
+  width: 48px;
+  height: 38px;
+  margin-left: 8px;
+  background-color: transparent;
+  -webkit-mask: none;
+  mask: none;
+  background-image: var(--bili-logo-img, none);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}
+#bili-elite-tb .tb-nav {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  /* 2px 只是两颗胶囊之间的一道缝（原来这里是 15px 的文字间距）。
+     1.2.1 v007 给每一项加了悬停衬底，间距改由 a 自己的 padding 出（10 + 2 + 10 = 22px）——
+     gap 还留 15 的话两段文字会被推成 35px，一眼就看得出散开了。 */
+  gap: 2px;
+  flex: none;
+}
+#bili-elite-tb .tb-entry {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  pointer-events: auto;
+}
+#bili-elite-tb .tb-entry > a {
+  display: inline-flex;
+  align-items: center;
+  /* 43px 高 + 10px 内边距 + 8px 圆角 —— 与右侧 `.tb-icon` 的悬停块**同一套几何**
+     （1.2.1 v007，用户要求「首页 / 动态 要有和右边一样的灰色衬底」）。
+     原来这里是 `height: 100%`：整条 64px 高，加上背景就是一根贯穿顶栏的长条，
+     和右边那几颗小方块完全不是一回事。 */
+  height: 43px;
+  padding: 0 10px;
+  border-radius: var(--bili-radius-md);
+  color: inherit;
+  font-size: 14px;
+  line-height: 22.4px;
+  text-decoration: none;
+  /* 涟漪宿主（1.2.5 v029）：裁切挂在这颗 a 自己身上是安全的 —— 频道面板
+     #bili-elite-home-panel 是它的**兄弟**（同在 .tb-entry 里），不会被裁到。
+     isolation + z -1：涟漪压在底色之上、文字与箭头之下。 */
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  --blie-ripple-z: -1;
+  transition:
+    color var(--bili-dur-fast) var(--bili-ease),
+    background-color var(--bili-dur-fast) var(--bili-ease);
+}
+#bili-elite-tb .tb-entry > a:hover,
+#bili-elite-tb .tb-entry.is-open > a {
+  color: #00aeec;
+  /* 与 `.tb-icon:hover` 逐字相同的值 —— 两边悬停观感必须一模一样。
+     v029 由 0.04 加深到 0.06（用户要求「悬停阴影略微加深」，按钮形态不变） */
+  background: rgba(0, 0, 0, 0.06);
+}
+/* 「首页 ∨」：和原生顶栏同一套遮罩（10px、左间距 5px），展开时翻转 180° */
+#bili-elite-tb .tb-arrow {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-left: 5px;
+  flex: 0 0 auto;
+  background-color: currentColor;
+  -webkit-mask: var(--bili-topbar-arrow) no-repeat center / contain;
+  mask: var(--bili-topbar-arrow) no-repeat center / contain;
+  transition: transform var(--bili-dur-slow) var(--bili-ease-spring);
+}
+#bili-elite-tb .tb-home:hover .tb-arrow,
+#bili-elite-tb .tb-home:has(#bili-elite-home-panel:hover) .tb-arrow {
+  transform: rotate(180deg);
+}
+
+/* ===== 3. 中间：搜索框 + 搜索面板 ===== */
+/* 搜索框的动效照 BewlyCat 那一套：静息是胶囊，聚焦时收成常规圆角矩形，
+   同时套一圈主题色描边 + 外发光；放大镜在悬停 / 聚焦时亮起一团光斑。
+   只借它的「动作」，颜色仍是 B 站自己的（#f1f2f3 底 / #00aeec 主题色）。
+   上游是 BewlyBewly 的 `components/SearchBar/SearchBar.vue`，出处与许可见 THIRD-PARTY-NOTICES.md。 */
+#bili-elite-tb .tb-search {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  translate: -50% 0;
+  width: 500px;
+  max-width: calc(100vw - 500px);
+  pointer-events: auto;
+}
+#bili-elite-tb .tb-search-form {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 40px;
+  box-sizing: border-box;
+  /* 静息是胶囊，聚焦时收成 12px 圆角。数值全部照 BewlyCat：
+     半径 --bew-radius（12px）、时长 --bew-duration-moderate（300ms）、
+     曲线 --bew-ease-standard（cubic-bezier(.22,.61,.36,1)，起步快 → 点下去就「展开」）。
+     静息半径写 20px（= 高 40 的一半）而不是 999px：两者看起来都是胶囊，
+     但 999px 要插值到 20px 以下才开始「看得出圆角在变」，前 2/3 的动画等于白跑。 */
+  border-radius: 20px;
+  background: #f1f2f3;
+  --bili-search-ring: #00aeec;
+  --bili-search-ring-40: rgba(0, 174, 236, 0.4);
+  --bili-search-ring-30: rgba(0, 174, 236, 0.3);
+  transition:
+    background-color 200ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    border-radius 300ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+#bili-elite-tb .tb-search-form:hover {
+  background: #e3e5e7;
+}
+/* 聚焦光环单独一层：box-shadow 的过渡是逐帧重绘，和半径一起做容易掉帧；
+   挪到 ::after 上只动 opacity（走合成层），观感一样但顺得多。
+   放在 input / 按钮下面（z-index 1 vs 2），描边不会糊住文字和放大镜。 */
+#bili-elite-tb .tb-search-form::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow:
+    0 0 0 2px var(--bili-search-ring),
+    0 6px 16px var(--bili-search-ring-40),
+    inset 0 0 6px var(--bili-search-ring-30);
+  transition: opacity 200ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+#bili-elite-tb .tb-search.is-focus .tb-search-form {
+  background: #fff;
+  border-radius: var(--bili-radius-lg);
+}
+#bili-elite-tb .tb-search.is-focus .tb-search-form::after {
+  opacity: 1;
+}
+#bili-elite-tb .tb-search-input {
+  position: relative;
+  z-index: 2;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  padding: 0 0 0 20px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: inherit;
+  color: #18191c;
+}
+#bili-elite-tb .tb-search-input::placeholder {
+  color: #9499a0;
+}
+#bili-elite-tb .tb-search-btn {
+  position: relative;
+  z-index: 2;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-right: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #18191c;
+  cursor: pointer;
+  isolation: isolate;
+  transition: color 280ms ease;
+}
+#bili-elite-tb .tb-search-btn::before {
+  content: '';
+  position: relative;
+  z-index: 1;
+  width: 18px;
+  height: 18px;
+  background-color: currentColor;
+  -webkit-mask: var(--bili-search-icon) no-repeat center / contain;
+  mask: var(--bili-search-icon) no-repeat center / contain;
+}
+/* 光斑：悬停 / 聚焦时从放大镜背后晕开（BewlyCat 的 ::before 光点，
+   这里换到 ::after，因为 ::before 已经被图标占用了）。用 scale 属性而不是 transform，
+   与全站其余动效保持一致。 */
+#bili-elite-tb .tb-search-btn::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #00aeec;
+  filter: blur(4px);
+  opacity: 0;
+  pointer-events: none;
+  translate: -50% -50%;
+  scale: 0.25;
+  transition:
+    scale 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 320ms ease;
+}
+#bili-elite-tb .tb-search-form:hover .tb-search-btn,
+#bili-elite-tb .tb-search.is-focus .tb-search-btn,
+#bili-elite-tb .tb-search-btn:hover {
+  color: #00aeec;
+}
+#bili-elite-tb .tb-search-form:hover .tb-search-btn::after,
+#bili-elite-tb .tb-search.is-focus .tb-search-btn::after,
+#bili-elite-tb .tb-search-btn:hover::after {
+  opacity: 0.4;
+  scale: 1.1;
+}
+
+/* 3.1 搜索面板：历史（药丸）/ 热搜（两栏）/ 联想（单列）三块共用一套行观感。
+   排版照改版前的面板：标题 16px、历史词条 12px 药丸、热搜按列填两栏。
+   开合用 opacity + 位移 + 缩放（display 不可过渡），关闭时 visibility 延迟到淡出结束；
+   位移 / 缩放数值取 BewlyCat 下拉面板的 translate-y-4 + scale-95。 */
+#bili-elite-tb .tb-sp {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  /* 压在搜索框的聚焦光环（::after，z-index 1）之上：那道 16px 的外发光会落到面板
+     顶边上，不抬这一层就会在面板上蒙一条淡蓝 */
+  z-index: 2;
+  margin-top: 8px;
+  padding: 13px 0 16px;
+  max-height: 66vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-sizing: border-box;
+  background: #fff;
+  border: 1px solid #e3e5e7;
+  border-radius: var(--bili-radius-lg);
+  box-shadow: 0 12px 34px rgba(20, 22, 30, 0.12);
+  visibility: hidden;
+  opacity: 0;
+  translate: 0 16px;
+  scale: 0.95;
+  pointer-events: none;
+  /* 时长 / 曲线照 BewlyCat 的 result-list：moderate(300ms) + ease-in-out。
+     origin 用默认的 center（BewlyCat 也没改），面板从搜索框底下「长出来」。 */
+  transition:
+    opacity 300ms ease-in-out,
+    translate 300ms ease-in-out,
+    scale 300ms ease-in-out,
+    visibility 0s linear 300ms;
+}
+#bili-elite-tb .tb-search.is-open .tb-sp {
+  visibility: visible;
+  opacity: 1;
+  translate: 0 0;
+  scale: 1;
+  pointer-events: auto;
+  transition:
+    opacity 300ms ease-in-out,
+    translate 300ms ease-in-out,
+    scale 300ms ease-in-out,
+    visibility 0s;
+}
+#bili-elite-tb .tb-sp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 24px;
+  padding: 0 16px;
+}
+#bili-elite-tb .tb-sp-title {
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
+  color: #18191c;
+}
+#bili-elite-tb .tb-sp-clear {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #9499a0;
+  font-size: 12px;
+  line-height: 15px;
+  cursor: pointer;
+  transition: color var(--bili-dur-fast) var(--bili-ease);
+}
+#bili-elite-tb .tb-sp-clear:hover {
+  color: #00aeec;
+}
+
+/* 3.2 搜索历史：药丸标签，默认最多 4 行（172px）。
+   超过 4 行时列表底部出现「展开」按钮，点开把这一块撑到面板能给的最大高度；
+   撑满之后仍然装不下就在区内上下滚动（`overscroll-behavior: contain` 保证
+   滚到底不会把滚动链传给面板，否则面板会跟着跳一下）。
+   高度常量在 `selfTopbar.ts` 的 `HISTORY_COLLAPSED_H`，改这里要同步改那边。 */
+#bili-elite-tb .tb-sp-histories {
+  padding: 0 16px;
+  max-height: 172px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* 展开态：把「面板 66vh 减去 上下 padding(13+16) / 标题行(24) / 按钮(30)」全给历史区，
+   再留 8px 给滚动条本身占掉的宽度 —— 不然 30 条这种「差 3px」的内容会白冒一条滚动条。
+   `max(172px, …)` 是兜底：视口很矮时（66vh 算出来比 172 还小）展开不能反而变矮。
+   再多的词就在这个高度里自己滚 —— 面板本身也能滚，两层都留有余量。 */
+#bili-elite-tb .tb-sp-history.is-expanded .tb-sp-histories {
+  max-height: max(172px, calc(66vh - 80px));
+}
+/* 细滚动条（与设置面板 .panel-body 同款），避免系统粗滚动条打断面板的观感。
+   注意别加 scrollbar-width —— 一旦写了它，Chrome 会改用平台滚动条并忽略下面这套
+   ::-webkit-scrollbar 规则，宽度会从 8px 变成 10px。 */
+#bili-elite-tb .tb-sp-histories::-webkit-scrollbar {
+  width: 8px;
+}
+#bili-elite-tb .tb-sp-histories::-webkit-scrollbar-track {
+  background: transparent;
+}
+#bili-elite-tb .tb-sp-histories::-webkit-scrollbar-thumb {
+  background: rgba(60, 60, 67, 0.22);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+#bili-elite-tb .tb-sp-histories::-webkit-scrollbar-thumb:hover {
+  background: rgba(60, 60, 67, 0.38);
+  background-clip: padding-box;
+}
+/* 内层负右边距抵消词条自己的 10px 右外边距，让最后一列与标题左对齐。
+   下边距不写：4 行 = 12 + 4×40 = 172，正好卡在 max-height 上，不会白冒一条滚动条。 */
+#bili-elite-tb .tb-sp-history-list {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 12px -10px 0 0;
+}
+
+/* 3.2.1 「展开 / 收起」按钮：显隐由 `selfTopbar.ts` 的 renderHistory 判（超过 4 行才给）。
+   贴一条极淡的分隔线，让「下面还有词」这件事一眼看得出来。 */
+#bili-elite-tb .tb-sp-fold {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-top: 1px solid #f1f2f3;
+  background: transparent;
+  color: #9499a0;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--bili-dur-fast) var(--bili-ease);
+}
+/* **`[hidden]` 必须单独兜一条**：上面那句 `display: flex` 的选择器比 UA 的
+   `[hidden] { display: none }` 更具体，不写这条按钮会永远露出来。 */
+#bili-elite-tb .tb-sp-fold[hidden] {
+  display: none;
+}
+#bili-elite-tb .tb-sp-fold:hover {
+  color: #00aeec;
+}
+/* 箭头：收起态朝下（点了会展开），展开态翻 180° 朝上 */
+#bili-elite-tb .tb-sp-fold-ic {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentColor;
+  transition: rotate var(--bili-dur-fast) var(--bili-ease);
+}
+#bili-elite-tb .tb-sp-fold.is-expanded .tb-sp-fold-ic {
+  rotate: 180deg;
+}
+
+/* 3.3 可选中行的基类：只声明公共观感，排版交给各自的形态类 */
+#bili-elite-tb .tb-sp-row {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  color: #18191c;
+  text-decoration: none;
+  cursor: pointer;
+}
+#bili-elite-tb .tb-sp-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+#bili-elite-tb .tb-sp-text em {
+  color: #00aeec;
+  font-style: normal;
+}
+
+/* 历史词条 */
+#bili-elite-tb .tb-sp-chip {
+  position: relative;
+  margin: 0 10px 10px 0;
+  padding: 7px 10px 8px;
+  border-radius: var(--bili-radius-sm);
+  background: #f6f7f8;
+  font-size: 12px;
+  line-height: 15px;
+  /* 涟漪宿主（1.2.5 v029）：删除角标悬在药丸**外**（right/top -6px），overflow:hidden
+     会把它切掉，改用外扩 8px 的 clip-path 裁涟漪 —— 角标在裁切区内完好，涟漪最多溢出 8px。
+     clip-path 自带层叠上下文，涟漪 z -1 压在药丸底色之上、文字之下。 */
+  clip-path: inset(-8px round var(--bili-radius-sm));
+  isolation: isolate;
+  --blie-ripple-z: -1;
+  transition:
+    background-color var(--bili-dur-fast) var(--bili-ease),
+    color var(--bili-dur-fast) var(--bili-ease);
+}
+#bili-elite-tb .tb-sp-chip:hover,
+#bili-elite-tb .tb-sp-chip.is-active {
+  background: #e3e5e7;
+  color: #00aeec;
+}
+#bili-elite-tb .tb-sp-chip-text {
+  max-width: 96px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* 删除：绝对定位在右上角外侧，不占词条宽度（原版就是 right:-6px / top:-6px），
+   悬停才浮出来 */
+#bili-elite-tb .tb-sp-chip-del {
+  position: absolute;
+  right: -6px;
+  top: -6px;
+  display: block;
+  width: 16px;
+  height: 16px;
+  color: #c9ccd0;
+  opacity: 0;
+  transition:
+    opacity var(--bili-dur-fast) var(--bili-ease),
+    color var(--bili-dur-fast) var(--bili-ease);
+}
+#bili-elite-tb .tb-sp-chip-del svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+#bili-elite-tb .tb-sp-chip:hover .tb-sp-chip-del {
+  opacity: 1;
+}
+#bili-elite-tb .tb-sp-chip-del:hover {
+  color: #9499a0;
+}
+
+/* 3.4 热搜：两栏按列填充（左 1/3/5/7/9，右 2/4/6/8/10），行高 38 与原版一致。
+   左右各留 8px 外边距给 hover 高光，词条左内边距 8px → 序号仍从 16px 起。 */
+#bili-elite-tb .tb-sp-hot-cols {
+  display: flex;
+  align-items: flex-start;
+}
+#bili-elite-tb .tb-sp-hot-col {
+  flex: 1 1 0;
+  min-width: 0;
+}
+#bili-elite-tb .tb-sp-hot-col + .tb-sp-hot-col {
+  margin-left: 10px;
+}
+#bili-elite-tb .tb-sp-row.is-hot {
+  position: relative;
+  height: 38px;
+  margin: 0 8px;
+  /* 右内边距只留 4px：两栏各 244 宽，扣掉左右外边距（16）、左内边距（8）、
+     序号（15 + 7）之后正文只剩 180px，而「工资改发数字人民币有何变化」实测要 182px，
+     差 2px 就会被省略号吃掉一个字。原版正文是直接顶到栏边界的。 */
+  padding: 0 4px 0 8px;
+  border-radius: var(--bili-radius-md);
+  font-size: 14px;
+  line-height: 17px;
+  /* 涟漪宿主（1.2.5 v029）：裁切 + z -1，序号与正文压在波纹之上 */
+  overflow: hidden;
+  isolation: isolate;
+  --blie-ripple-z: -1;
+  transition: background-color var(--bili-dur-fast) var(--bili-ease);
+}
+#bili-elite-tb .tb-sp-row.is-hot:hover,
+#bili-elite-tb .tb-sp-row.is-hot.is-active {
+  background: #f1f2f3;
+}
+#bili-elite-tb .tb-sp-rank {
+  flex: none;
+  width: 15px;
+  margin-right: 7px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 500;
+  color: #18191c;
+}
+
+/* 3.5 联想：单列，行高 38，与热搜行同高 */
+#bili-elite-tb .tb-sp-suggest-list .tb-sp-row {
+  height: 38px;
+  margin: 0 8px;
+  padding: 0 8px;
+  border-radius: var(--bili-radius-md);
+  font-size: 14px;
+  line-height: 17px;
+  transition: background-color var(--bili-dur-fast) var(--bili-ease);
+}
+#bili-elite-tb .tb-sp-suggest-list .tb-sp-row:hover,
+#bili-elite-tb .tb-sp-suggest-list .tb-sp-row.is-active {
+  background: #f1f2f3;
+}
+#bili-elite-tb .tb-sp-empty {
+  padding: 6px 16px 4px;
+  font-size: 13px;
+  color: #9499a0;
+}
+
+/* ===== 4. 右侧图标区 ===== */
+#bili-elite-tb .tb-right {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  height: 100%;
+  pointer-events: auto;
+}
+#bili-elite-tb .tb-icon {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  width: 50px;
+  height: 43px;
+  border-radius: var(--bili-radius-md);
+  color: inherit;
+  text-decoration: none;
+  /* 涟漪宿主（1.2.5 v029）：裁切 + z -1（图标 / 文字 / 未读气泡都压在涟漪之上） */
+  overflow: hidden;
+  isolation: isolate;
+  --blie-ripple-z: -1;
+  transition:
+    color var(--bili-dur-fast) var(--bili-ease),
+    background-color var(--bili-dur-fast) var(--bili-ease);
+}
+#bili-elite-tb .tb-icon:hover {
+  color: #00aeec;
+  /* v029 由 0.04 加深到 0.06：悬停阴影略微加深，按钮形态不变（尺寸 / 圆角没动） */
+  background: rgba(0, 0, 0, 0.06);
+}
+/* 图标是照 B 站原生那套 SVG 搬过来的：消息是 20×20，动态 / 收藏 / 历史是 20×21，
+   所以高度交给 viewBox 的比例算，别写死 20px 把它压扁 */
+#bili-elite-tb .tb-icon svg {
+  display: block;
+  width: 20px;
+  height: auto;
+}
+#bili-elite-tb .tb-icon-text {
+  font-size: 13px;
+  line-height: 16px;
+}
+/* 未读气泡：数字 > 99 显示 99+，0 时整个隐藏（脚本挂 hidden）。
+   颜色照 BewlyCat 的 notification-badge（主题蓝 + 白字 + 全圆角），
+   不是 B 站原生那个粉点 —— 顶栏是我们自己画的，跟着 BewlyCat 走。 */
+#bili-elite-tb .tb-badge {
+  position: absolute;
+  top: 1px;
+  right: 7px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: #00aeec;
+  color: #fff;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  font-style: normal;
+  /* 气泡压在图标上，加一圈顶栏底色描边把它「抠」出来（BewlyCat 靠的是浮层底色） */
+  box-shadow: 0 0 0 1.5px var(--bili-tb-badge-ring, #fff);
+}
+#bili-elite-tb .tb-badge[hidden] {
+  display: none;
+}
+/* 投稿：90×34 的粉色胶囊，和原生顶栏那个一模一样 */
+#bili-elite-tb .tb-upload {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 90px;
+  height: 34px;
+  margin-left: 10px;
+  border-radius: var(--bili-radius-md);
+  background: #fb7299;
+  color: #fff;
+  font-size: 13px;
+  text-decoration: none;
+  /* 涟漪宿主（1.2.5 v029）：白色 currentColor 的波纹落在粉色胶囊上，形态不变 */
+  overflow: hidden;
+  isolation: isolate;
+  --blie-ripple-z: -1;
+  transition: background-color var(--bili-dur-fast) var(--bili-ease);
+}
+#bili-elite-tb .tb-upload:hover {
+  background: #fc8bab;
+}
+/* 「投稿按钮移除」：整颗收掉（含它那 10px 左边距）。
+   右侧那排图标不用做任何补偿 —— .tb-right 是 `margin-left: auto` 贴右对齐的，
+   少了最后一格，前面几格自然整体右移，和原生顶栏「隐藏大会员 / 创作中心」是同一套。
+   注意这是 display: none 而不是 visibility: hidden：后者会把那 100px 的空位留下来。 */
+html.bili-elite-tb-no-upload #bili-elite-tb .tb-upload {
+  display: none;
+}
+#bili-elite-tb .tb-upload svg {
+  width: 18px;
+  height: 18px;
+}
+/* 头像 / 未登录时的蓝色人像圆 */
+#bili-elite-tb .tb-avatar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 50px;
+  height: 64px;
+  text-decoration: none;
+  color: inherit;
+}
+#bili-elite-tb .tb-avatar-img {
+  display: block;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #f1f2f3;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
+  transition: box-shadow var(--bili-dur-fast) var(--bili-ease);
+}
+#bili-elite-tb .tb-avatar:hover .tb-avatar-img {
+  box-shadow: 0 0 0 2px #00aeec;
+}
+#bili-elite-tb .tb-login {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  width: 50px;
+  height: 43px;
+  border-radius: var(--bili-radius-md);
+  color: inherit;
+  text-decoration: none;
+  /* 涟漪宿主（1.2.5 v029），同 `.tb-icon` 那一套 */
+  overflow: hidden;
+  isolation: isolate;
+  --blie-ripple-z: -1;
+  transition:
+    color var(--bili-dur-fast) var(--bili-ease),
+    background-color var(--bili-dur-fast) var(--bili-ease);
+}
+#bili-elite-tb .tb-login:hover {
+  color: #00aeec;
+  /* v029 由 0.04 加深到 0.06（同 `.tb-icon:hover`） */
+  background: rgba(0, 0, 0, 0.06);
+}
+#bili-elite-tb .tb-login-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #00aeec;
+  color: #fff;
+}
+#bili-elite-tb .tb-login-mark svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ===== 4.1 右侧项 + 悬停浮层 =====
+   每个右侧项都包一层 .tb-item：浮层是它的子节点，所以「从图标移到卡片」这一段
+   不会触发 mouseleave（否则中间那条缝一过，浮层就开始收）。
+   浮层顶部的 8px 是透明「桥」，卡片本身在 .tb-pop-card 里。
+   默认是纯白卡片 + 一圈柔和投影（和原生顶栏那几个悬停面板一致）；「高级材质 → 触发面板」
+   打开时换毛玻璃，见 §5.1。
+
+   开合动画（1.1.6 v010 重做）：
+   以前是「纯淡入 + 6px 位移 + 弹簧曲线」，6px 太小、弹簧在这么短的行程里只会让
+   最后那一下「顿一下」，观感接近「一块白突然出现」。现在改成从图标那个角「落」下来：
+     · 位移 10px（肉眼能看出方向），配 scale 0.98 → 1，transform-origin 顶到图标那侧，
+       看起来是从图标里长出来的，不是凭空浮上来的；
+     · 打开 180ms、关闭 120ms —— 关得快，是因为「收」不需要被看清，拖久了像卡住；
+     · 打开时 opacity 走 120ms、位移/缩放走 180ms：先看见、再落位。
+       反过来（先落位再显形）会有一段「半透明的框在动」，最难看。
+     · 两条曲线都用「起步快、收尾缓」的 ease-out；关闭换成 ease-in（加速离场）。
+       以前 translate 用 --bili-ease-spring，收的时候却用 --bili-ease，
+       一开一关两种手感，来回扫几下就能感觉到不一致。
+     · visibility 的延迟严格等于关闭总时长（120ms），不再像以前那样 opacity 160ms
+       结束、visibility 220ms 才切 —— 中间那 60ms 元素已经看不见却还在吃事件，
+       鼠标移回来会从中间状态重新过渡，闪一下。 */
+#bili-elite-tb .tb-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+}
+#bili-elite-tb .tb-pop {
+  position: absolute;
+  top: 100%;
+  right: -8px;
+  z-index: 1;
+  padding-top: 8px;
+  box-sizing: border-box;
+  visibility: hidden;
+  opacity: 0;
+  translate: 0 -10px;
+  scale: 0.98;
+  /* 从图标那一侧展开：右对齐的面板贴在右上角，头像那个居中的面板单独覆盖成顶边居中 */
+  transform-origin: 100% 0;
+  pointer-events: none;
+  transition:
+    opacity 90ms cubic-bezier(0.4, 0, 1, 1),
+    translate 120ms cubic-bezier(0.4, 0, 1, 1),
+    scale 120ms cubic-bezier(0.4, 0, 1, 1),
+    visibility 0s linear 120ms;
+}
+#bili-elite-tb .tb-item.is-open .tb-pop {
+  visibility: visible;
+  opacity: 1;
+  translate: 0 0;
+  scale: 1;
+  pointer-events: auto;
+  transition:
+    opacity 120ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    translate 180ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    scale 180ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    visibility 0s;
+}
+#bili-elite-tb .tb-pop-card {
+  box-sizing: border-box;
+  background: #FFFFFF;
+  border: 1px solid #DADCE0;
+  /* 圆角 / 投影向设置面板靠：面板是 24，浮层比它小一档用 16 */
+  border-radius: 16px;
+  box-shadow:
+    0 1px 3px rgba(60, 64, 67, 0.15),
+    0 8px 24px 3px rgba(60, 64, 67, 0.12);
+  overflow: hidden;
+}
+/* 各面板宽度：消息 / 头像照原生（144 / 300），动态·收藏·历史照 BewlyCat（380 / 450 / 380） */
+#bili-elite-tb .tb-item-msg .tb-pop {
+  width: 144px;
+}
+#bili-elite-tb .tb-item-dyn .tb-pop,
+#bili-elite-tb .tb-item-his .tb-pop {
+  width: 380px;
+}
+#bili-elite-tb .tb-item-fav .tb-pop {
+  width: 450px;
+}
+/* 头像那个浮层：原生 300，1.1.6 v018 收到 260（用户要求「变窄一些」），
+   仍然水平居中在头像下面（右对齐会顶到投稿按钮）。margin-left 必须是宽度的一半。 */
+#bili-elite-tb .tb-item-avatar .tb-pop {
+  right: auto;
+  left: 50%;
+  width: 260px;
+  margin-left: -130px;
+  /* 它是水平居中的，展开原点要跟着换成顶边中点 —— 留着 100% 0 的话会「从右上角斜着摊开」 */
+  transform-origin: 50% 0;
+}
+#bili-elite-tb .tb-pop-body {
+  display: flex;
+  flex-direction: column;
+  max-height: min(500px, calc(100vh - 96px));
+}
+
+/* 4.1.1 面板头：tab（视频 / 直播 / 专栏）+ 查看全部 */
+#bili-elite-tb .tb-pop-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px 8px;
+}
+/* 1.1.6 v018 起用「设置面板左侧分类」那一套；1.2.5 v004 进一步换成 M3 胶囊 + 涟漪：
+   以前是 8px 圆角 + 从左往右刷出来的 10% 蓝底，和面板里已经改成胶囊 + 涟漪的分类按钮
+   还是两种语言。现在同色（#1A73E8 / #D3E3FD）、同形（999px）、同一套涟漪。 */
+#bili-elite-tb .tb-pop-tabs {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  margin-left: -14px;
+}
+#bili-elite-tb .tb-pop-tab {
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 999px;
+  background-color: transparent;
+  color: #5F6368;
+  font-size: 14px;
+  line-height: 20px;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color 0.2s cubic-bezier(0.2, 0, 0, 1),
+    color 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+#bili-elite-tb .tb-pop-tab:hover {
+  background-color: rgba(60, 64, 67, 0.08);
+  color: #202124;
+}
+#bili-elite-tb .tb-pop-tab.is-active {
+  background-color: #D3E3FD;
+  color: #1A73E8;
+  font-weight: 600;
+}
+/* 选中 + 悬停：保持浅蓝容器，不再叠灰 */
+#bili-elite-tb .tb-pop-tab.is-active:hover {
+  background-color: #D3E3FD;
+}
+#bili-elite-tb .tb-pop-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+#bili-elite-tb .tb-pop-actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  margin-right: -10px;
+}
+#bili-elite-tb .tb-pop-action {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: #5F6368;
+  font-size: 13px;
+  line-height: 20px;
+  text-decoration: none;
+  white-space: nowrap;
+  position: relative;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color 0.2s cubic-bezier(0.2, 0, 0, 1),
+    color 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+#bili-elite-tb .tb-pop-action:hover {
+  background-color: rgba(60, 64, 67, 0.08);
+  color: #1A73E8;
+}
+
+/* 4.1.2 列表与空态 */
+#bili-elite-tb .tb-pop-list {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  padding: 0 8px 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+#bili-elite-tb .tb-pop-empty {
+  padding: 26px 12px 22px;
+  color: #9499a0;
+  font-size: 13px;
+  text-align: center;
+}
+#bili-elite-tb .tb-pop-empty a {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 4px;
+  border-radius: 4px;
+  color: #1A73E8;
+  text-decoration: none;
+  /* inline 元素没法裁切涟漪，改成 inline-block 才能 position/overflow */
+  position: relative;
+  overflow: hidden;
+}
+#bili-elite-tb .tb-pop-empty a:hover {
+  text-decoration: underline;
+}
+
+/* 4.1.6 涟漪（与设置面板同一套）
+   selfTopbar.ts 用 installRipple(document, TOPBAR_RIPPLE) 在 pointerdown 时建 span.blie-ripple；
+   节点样式在 ripple.css（全仓库唯一一份），由 installRipple 自己注入 document，这里不再放副本。 */
+/* 卡片里的内容压在涟漪之上（文字 / 封面不会被那层波纹盖住） */
+#bili-elite-tb .tb-media > :not(.blie-ripple) {
+  position: relative;
+  z-index: 1;
+}
+/* 选中态是浅蓝底 + 品牌蓝字，涟漪直接用 currentColor（品牌蓝）——
+   参考页的 0.3 起始透明度在浅蓝底上已经足够明显，不必再换深色。 */
+
+/* 4.1.3 横向媒体卡（动态 / 收藏 / 历史共用）
+   封面列默认 160 宽，`is-narrow` 收到 120（收藏 / 动态那两栏照 BewlyCat） */
+#bili-elite-tb .tb-media {
+  display: flex;
+  flex: none;
+  gap: 12px;
+  padding: 6px;
+  border-radius: 12px;
+  color: #202124;
+  text-decoration: none;
+  /* 涟漪容器：overflow 裁切 + relative 定位 */
+  position: relative;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+#bili-elite-tb .tb-media:hover {
+  background: #F1F3F4;
+}
+#bili-elite-tb .tb-media-col {
+  position: relative;
+  flex: 0 0 auto;
+  width: 160px;
+  align-self: flex-start;
+}
+#bili-elite-tb .tb-media.is-narrow .tb-media-col {
+  width: 120px;
+}
+#bili-elite-tb .tb-media-frame {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #f1f2f3;
+}
+#bili-elite-tb .tb-media-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+#bili-elite-tb .tb-media-frame img.is-contain {
+  object-fit: contain;
+}
+/* 时长 / 进度 / LIVE 角标 */
+#bili-elite-tb .tb-media-badge {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 12px;
+  font-style: normal;
+  line-height: 16px;
+  white-space: nowrap;
+}
+/* 历史卡的观看进度条，压在封面下沿 */
+#bili-elite-tb .tb-media-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 0 0 8px 8px;
+  background: rgba(0, 0, 0, 0.15);
+}
+#bili-elite-tb .tb-media-bar i {
+  display: block;
+  height: 100%;
+  background: #00aeec;
+}
+/* 历史卡的删除按钮：悬停卡片才出现 */
+#bili-elite-tb .tb-media-del {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  /* 涟漪容器 + 压在涟漪之上（涟漪 z-index 0，append 在最后会盖住它） */
+  overflow: hidden;
+  z-index: 1;
+  opacity: 0;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    opacity var(--bili-dur-fast) var(--bili-ease),
+    background-color var(--bili-dur-fast) var(--bili-ease);
+}
+#bili-elite-tb .tb-media:hover .tb-media-del {
+  opacity: 1;
+}
+#bili-elite-tb .tb-media-del:hover {
+  background: #f56c6c;
+}
+#bili-elite-tb .tb-media-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  padding: 1px 0;
+}
+#bili-elite-tb .tb-media-title {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 14px;
+  line-height: 20px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+#bili-elite-tb .tb-media-author {
+  overflow: hidden;
+  color: #9499a0;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+#bili-elite-tb .tb-media-meta {
+  color: #9499a0;
+  font-size: 12px;
+  line-height: 16px;
+}
+/* 动态那栏是「头像 + UP 名 + 时间」一行，压在卡片底部（照 BewlyCat 的 byline） */
+#bili-elite-tb .tb-media-byline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-top: auto;
+  padding-top: 4px;
+}
+#bili-elite-tb .tb-media-face {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #f1f2f3;
+}
+#bili-elite-tb .tb-media-time {
+  flex: none;
+  margin-left: auto;
+  color: #9499a0;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* 4.1.4 收藏面板：左侧收藏夹栏 + 右侧内容（BewlyCat 450 宽那套） */
+#bili-elite-tb .tb-pop-split {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+#bili-elite-tb .tb-fav-side {
+  flex: 0 0 auto;
+  width: 140px;
+  padding: 2px 6px 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+#bili-elite-tb .tb-fav-cat {
+  display: block;
+  width: 100%;
+  margin-bottom: 2px;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 999px;
+  /* 与顶部 tab 同一套：胶囊 + 浅蓝选中底 + M3 涟漪（擦除动画已去掉，
+     同一个扩展里不该有两种选中语言）。 */
+  background-color: transparent;
+  color: #202124;
+  font-size: 13px;
+  line-height: 18px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  position: relative;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color 0.2s cubic-bezier(0.2, 0, 0, 1),
+    color 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+#bili-elite-tb .tb-fav-cat:hover {
+  background-color: rgba(60, 64, 67, 0.08);
+}
+#bili-elite-tb .tb-fav-cat.is-active {
+  background-color: #D3E3FD;
+  color: #1A73E8;
+  font-weight: 600;
+}
+/* 选中 + 悬停：保持浅蓝容器，不再叠灰 */
+#bili-elite-tb .tb-fav-cat.is-active:hover {
+  background-color: #D3E3FD;
+}
+
+/* 4.1.5 消息面板（原生：144 宽、五行、42 高、左右 27 内边距） */
+#bili-elite-tb .tb-msg-list {
+  padding: 12px 0;
+}
+#bili-elite-tb .tb-msg-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 42px;
+  padding: 0 27px;
+  box-sizing: border-box;
+  color: #61666d;
+  font-size: 14px;
+  line-height: 22px;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color var(--bili-dur-fast) var(--bili-ease);
+}
+#bili-elite-tb .tb-msg-item:hover {
+  color: #00aeec;
+}
+/* 每行右侧的未读气泡：照 BewlyCat 的 .notification-badge
+   （主题蓝底 / 白字 12px / 高 16 / 全圆角 / 距文字 12px），没有未读就整块不渲染 */
+#bili-elite-tb .tb-msg-count {
+  flex: none;
+  min-width: 16px;
+  height: 16px;
+  margin-left: auto;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: #00aeec;
+  color: #fff;
+  font-size: 12px;
+  line-height: 16px;
+  text-align: center;
+  font-style: normal;
+}
+
+/* 4.1.6 头像面板（照原生 300 宽那套，去掉「尊贵的大会员」横幅） */
+#bili-elite-tb .tb-item-avatar .tb-pop-card {
+  padding: 16px 24px 18px;
+}
+#bili-elite-tb .tb-user {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+#bili-elite-tb .tb-user-face-link {
+  display: block;
+}
+#bili-elite-tb .tb-user-face {
+  display: block;
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #f1f2f3;
+}
+#bili-elite-tb .tb-user-name {
+  max-width: 100%;
+  margin-top: 8px;
+  overflow: hidden;
+  color: #18191c;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 26px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-decoration: none;
+}
+#bili-elite-tb .tb-user-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+#bili-elite-tb .tb-user-vip,
+#bili-elite-tb .tb-user-level {
+  padding: 0 5px;
+  border-radius: 3px;
+  color: #fff;
+  font-size: 11px;
+  line-height: 16px;
+}
+#bili-elite-tb .tb-user-vip {
+  background: linear-gradient(90deg, #fb7299 0%, #ff9db5 100%);
+}
+#bili-elite-tb .tb-user-level {
+  background: linear-gradient(90deg, #ff9f5a 0%, #ffc46b 100%);
+}
+#bili-elite-tb .tb-user-coins {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 18px;
+}
+#bili-elite-tb .tb-user-coins a {
+  color: #18191c;
+  text-decoration: none;
+}
+#bili-elite-tb .tb-user-coins span {
+  color: #9499a0;
+}
+#bili-elite-tb .tb-user-coins b {
+  font-weight: 400;
+}
+#bili-elite-tb .tb-user-counts {
+  display: flex;
+  width: 100%;
+  margin-top: 10px;
+}
+#bili-elite-tb .tb-user-counts a {
+  flex: 1 1 0;
+  color: #18191c;
+  text-align: center;
+  text-decoration: none;
+}
+#bili-elite-tb .tb-user-counts b {
+  display: block;
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 24px;
+}
+#bili-elite-tb .tb-user-counts span {
+  color: #9499a0;
+  font-size: 12px;
+  line-height: 18px;
+}
+#bili-elite-tb .tb-user-links {
+  width: 100%;
+  margin-top: 14px;
+}
+#bili-elite-tb .tb-user-split {
+  width: 100%;
+  height: 1px;
+  margin: 10px 0;
+  background: #f1f2f3;
+}
+#bili-elite-tb .tb-user-link {
+  display: flex;
+  align-items: center;
+  /* 1.1.6 v018：三行（个人中心 / 投稿管理 / 退出登录）全部**图标 + 文字整体居中**。
+     v015 那版是「图标钉左边缘、文字居中」，看着图标和文字之间空一大块 —— 用户要求
+     图标贴着文字左边，那就只能让整组居中，图标不再脱出流。 */
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #61666d;
+  font-size: 14px;
+  line-height: 22px;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color var(--bili-dur-fast) var(--bili-ease);
+}
+#bili-elite-tb .tb-user-link:hover {
+  color: #00aeec;
+}
+#bili-elite-tb .tb-user-link.is-logout {
+  height: 42px;
+}
+
+/* ===== 5. 毛玻璃材质（高级材质 → 顶栏 / 搜索框 / 搜索面板 / 触发面板） =====
+   顶栏自己用 ::before 承载 backdrop-filter：一旦挂在宿主上，宿主就成了后代的「背景根」，
+   搜索面板 / 频道面板的毛玻璃就只采得到顶栏内部（空），整段淡入期间没有模糊。
+   这套做法与 topbar.css §7 里原生顶栏那套完全一致。 */
+html.bili-elite-glass #bili-elite-tb {
+  background: transparent;
+  box-shadow: 0 8px 24px rgba(20, 22, 30, calc(var(--bili-topbar-tint, 0.62) * 0.16));
+}
+html.bili-elite-glass #bili-elite-tb::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  box-sizing: border-box;
+  pointer-events: none;
+  background-color: rgba(255, 255, 255, var(--bili-topbar-tint, 0.62));
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, calc(var(--bili-topbar-tint, 0.62) * 0.22)) 0%, rgba(255, 255, 255, 0) 62%);
+  -webkit-backdrop-filter: blur(var(--bili-topbar-blur, 24px)) saturate(190%) brightness(var(--bili-topbar-bright, 1.08));
+  backdrop-filter: blur(var(--bili-topbar-blur, 24px)) saturate(190%) brightness(var(--bili-topbar-bright, 1.08));
+  border-bottom: 0.5px solid rgba(0, 0, 0, calc(var(--bili-topbar-tint, 0.62) * 0.1));
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, calc(var(--bili-topbar-tint, 0.62) * 1.2));
+}
+/* 顶栏渐变：上实下透，和原生顶栏那版同一条曲线（见 topbar.css §7.3 的历史注释） */
+html.bili-elite-glass.bili-elite-topbar-fade #bili-elite-tb {
+  box-shadow: none;
+}
+html.bili-elite-glass.bili-elite-topbar-fade #bili-elite-tb::before {
+  background-color: transparent;
+  background-image: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, calc(var(--bili-topbar-tint, 0.62) * 1.32)) 0%,
+    rgba(255, 255, 255, calc(var(--bili-topbar-tint, 0.62) * 1.04)) 45%,
+    rgba(255, 255, 255, calc(var(--bili-topbar-tint, 0.62) * 0.72)) 70%,
+    rgba(255, 255, 255, calc(var(--bili-topbar-tint, 0.62) * 0.40)) 86%,
+    rgba(255, 255, 255, calc(var(--bili-topbar-tint, 0.62) * 0.10)) 96%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  /* 关键：遮罩同时作用在白纱和 backdrop-filter 的结果上 —— 模糊跟着一起淡，
+     底边才不会留一条「清晰的玻璃」，观感是「化开」而不是「切断」。
+     少了这一段就只剩白纱在变淡、模糊还满格，看起来就是一条实心白条。 */
+  -webkit-mask-image: linear-gradient(
+    180deg,
+    #000 0%,
+    #000 44%,
+    rgba(0, 0, 0, 0.98) 55%,
+    rgba(0, 0, 0, 0.93) 64%,
+    rgba(0, 0, 0, 0.84) 72%,
+    rgba(0, 0, 0, 0.70) 79%,
+    rgba(0, 0, 0, 0.52) 86%,
+    rgba(0, 0, 0, 0.32) 92%,
+    rgba(0, 0, 0, 0.14) 96%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    180deg,
+    #000 0%,
+    #000 44%,
+    rgba(0, 0, 0, 0.98) 55%,
+    rgba(0, 0, 0, 0.93) 64%,
+    rgba(0, 0, 0, 0.84) 72%,
+    rgba(0, 0, 0, 0.70) 79%,
+    rgba(0, 0, 0, 0.52) 86%,
+    rgba(0, 0, 0, 0.32) 92%,
+    rgba(0, 0, 0, 0.14) 96%,
+    transparent 100%
+  );
+  border-bottom-color: transparent;
+  box-shadow: none;
+}
+/* 搜索框材质：透明底 + 模糊，悬停 / 聚焦靠半透明灰提亮 */
+/* 与原生顶栏 §8 那套逐条对齐：底色用遮罩值、顶部一道高光渐变、0.5px 发丝边、
+   内高光 + 外投影，模糊同样是 blur + saturate(190%) + brightness(1.08)。
+   两边观感必须一样，否则开关一关（退回原生顶栏）搜索框会突然换一张脸。 */
+html.bili-elite-searchbox-glass #bili-elite-tb .tb-search-form {
+  background-color: rgba(255, 255, 255, var(--bili-searchbox-tint, 0.62));
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, calc(var(--bili-searchbox-tint, 0.62) * 0.2)) 0%, rgba(255, 255, 255, 0) 62%);
+  -webkit-backdrop-filter: blur(var(--bili-searchbox-blur, 20px)) saturate(190%) brightness(1.08);
+  backdrop-filter: blur(var(--bili-searchbox-blur, 20px)) saturate(190%) brightness(1.08);
+  border: 0.5px solid rgba(0, 0, 0, calc(var(--bili-searchbox-tint, 0.62) * 0.1));
+  box-shadow:
+    inset 0 0.5px 0 rgba(255, 255, 255, calc(var(--bili-searchbox-tint, 0.62) * 1.2)),
+    0 2px 10px rgba(20, 22, 30, calc(var(--bili-searchbox-tint, 0.62) * 0.12));
+}
+html.bili-elite-searchbox-glass #bili-elite-tb .tb-search-form:hover {
+  background-color: rgba(255, 255, 255, calc(var(--bili-searchbox-tint, 0.62) * 1.08));
+}
+html.bili-elite-searchbox-glass #bili-elite-tb .tb-search.is-focus .tb-search-form {
+  background-color: rgba(255, 255, 255, calc(var(--bili-searchbox-tint, 0.62) * 1.12));
+  border-radius: var(--bili-radius-lg);
+}
+/* 搜索面板材质 */
+html.bili-elite-searchpanel-glass #bili-elite-tb .tb-sp {
+  background-color: rgba(255, 255, 255, var(--bili-searchpanel-tint, 0.61));
+  -webkit-backdrop-filter: blur(var(--bili-searchpanel-blur, 38px)) saturate(190%) brightness(1.06);
+  backdrop-filter: blur(var(--bili-searchpanel-blur, 38px)) saturate(190%) brightness(1.06);
+  border-color: rgba(255, 255, 255, calc(var(--bili-searchpanel-tint, 0.61) * 0.7));
+  box-shadow:
+    0 18px 44px rgba(20, 22, 30, calc(var(--bili-searchpanel-tint, 0.61) * 0.27)),
+    0 4px 12px rgba(20, 22, 30, calc(var(--bili-searchpanel-tint, 0.61) * 0.12));
+}
+html.bili-elite-searchpanel-glass #bili-elite-tb .tb-sp-row.is-hot:hover,
+html.bili-elite-searchpanel-glass #bili-elite-tb .tb-sp-row.is-hot.is-active,
+html.bili-elite-searchpanel-glass #bili-elite-tb .tb-sp-suggest-list .tb-sp-row:hover,
+html.bili-elite-searchpanel-glass #bili-elite-tb .tb-sp-suggest-list .tb-sp-row.is-active,
+html.bili-elite-searchpanel-glass #bili-elite-tb .tb-sp-chip:hover,
+html.bili-elite-searchpanel-glass #bili-elite-tb .tb-sp-chip.is-active {
+  background: rgba(120, 120, 128, 0.12);
+}
+/* 毛玻璃面板上的药丸不能是不透明灰块，否则像贴了张纸 */
+html.bili-elite-searchpanel-glass #bili-elite-tb .tb-sp-chip {
+  background: rgba(120, 120, 128, 0.1);
+}
+/* 悬停浮层的材质见 §5.1。 */
+
+/* 5.1 触发面板材质：右侧「头像 / 消息 / 动态 / 收藏 / 历史」的悬停浮层。
+   和原生顶栏那几个浮层（topbar.css §7.2）、频道面板、卡片「⋮」菜单是同一块材质，
+   共用同一组 --bili-homepanel-blur / -tint —— 高级材质里不给它单开一行滑块。
+   浮层只有一层白底（.tb-pop-card），换掉它就是全部；内层都是纯容器 / 透明底。
+
+   淡入必须「挪一层」（同 topbar.css §7.3 那个坑）：.tb-pop 的 opacity 是 0→1 过渡的，
+   祖先 opacity < 1 就成了背景根 —— 整段 180ms 里卡片采不到后面的页面内容，玻璃一点
+   模糊都没有，最后一帧才「啪」地糊上。所以材质开着时把 .tb-pop 的 opacity 钉成 1
+   （开合仍靠 visibility / pointer-events 收），淡入改挂到 .tb-pop-card 自己身上：
+   元素自己的 opacity 不影响自己的 backdrop-filter，模糊从第一帧就是对的。 */
+html.bili-elite-homepanel-glass #bili-elite-tb .tb-pop {
+  opacity: 1;
+}
+html.bili-elite-homepanel-glass #bili-elite-tb .tb-pop-card {
+  opacity: 0;
+  background-color: rgba(255, 255, 255, var(--bili-homepanel-tint, 0.61));
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, calc(var(--bili-homepanel-tint, 0.61) * 0.12)) 0%, rgba(255, 255, 255, 0) 70%);
+  -webkit-backdrop-filter: blur(var(--bili-homepanel-blur, 38px)) saturate(190%) brightness(1.06);
+  backdrop-filter: blur(var(--bili-homepanel-blur, 38px)) saturate(190%) brightness(1.06);
+  border: 1px solid rgba(255, 255, 255, calc(var(--bili-homepanel-tint, 0.61) * 0.7));
+  box-shadow:
+    0 18px 44px rgba(20, 22, 30, calc(var(--bili-homepanel-tint, 0.61) * 0.27)),
+    0 4px 12px rgba(20, 22, 30, calc(var(--bili-homepanel-tint, 0.61) * 0.12));
+  /* 关闭 90ms 加速离场，与 .tb-pop 的关闭时长一致 */
+  transition: opacity 90ms cubic-bezier(0.4, 0, 1, 1);
+}
+html.bili-elite-homepanel-glass #bili-elite-tb .tb-item.is-open .tb-pop-card {
+  opacity: 1;
+  /* 打开 120ms：起步快、收尾缓，和 .tb-pop 那条「先看见、再落位」同一条曲线 */
+  transition: opacity 120ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+/* 条目悬停底换成半透明灰 —— 不透明的 #f6f7f8 铺在毛玻璃上就是一块白板
+   （和频道面板条目 / ⋮ 菜单条目同一套值） */
+html.bili-elite-homepanel-glass #bili-elite-tb .tb-media:hover,
+html.bili-elite-homepanel-glass #bili-elite-tb .tb-fav-cat:hover {
+  background-color: rgba(120, 120, 128, 0.12);
+}
+
+/* ===== 6. 窄窗口 =====
+   照原生顶栏那套收缩方式（实测 1200 宽时 B 站把右侧图标压成 25px、投稿变成 34px 的图标按钮，
+   登录仍是 50px；搜索框继续居中，再窄才缩短）：右侧 350 → 192，搜索框按 100vw − 500 收窄，
+   两者永远不会叠在一起。 */
+@media (max-width: 1280px) {
+  #bili-elite-tb .tb-icon {
+    width: 25px;
+  }
+  #bili-elite-tb .tb-icon-text {
+    display: none;
+  }
+  #bili-elite-tb .tb-upload {
+    width: 34px;
+    gap: 0;
+    margin-left: 8px;
+  }
+  #bili-elite-tb .tb-upload span {
+    display: none;
+  }
+}
+
+/* ===== 7. 减少动态效果 =====
+   位移 / 翻转全部去掉，只留颜色与透明度（同 designTokens.css 的约定）。 */
+@media (prefers-reduced-motion: reduce) {
+  #bili-elite-tb .tb-arrow,
+  #bili-elite-tb .tb-home:hover .tb-arrow,
+  #bili-elite-tb .tb-home:has(#bili-elite-home-panel:hover) .tb-arrow {
+    transition: none;
+    transform: none;
+  }
+  #bili-elite-tb .tb-sp,
+  #bili-elite-tb .tb-search.is-open .tb-sp {
+    translate: 0 0;
+    scale: 1;
+    transition:
+      opacity var(--bili-dur-fast) linear,
+      visibility 0s;
+  }
+  #bili-elite-tb .tb-search-form,
+  #bili-elite-tb .tb-search.is-focus .tb-search-form {
+    transition:
+      background-color var(--bili-dur-fast) linear,
+      border-radius 0s;
+  }
+  #bili-elite-tb .tb-search-form::after {
+    transition: opacity var(--bili-dur-fast) linear;
+  }
+  #bili-elite-tb .tb-search-btn::after,
+  #bili-elite-tb .tb-search-form:hover .tb-search-btn::after,
+  #bili-elite-tb .tb-search.is-focus .tb-search-btn::after,
+  #bili-elite-tb .tb-search-btn:hover::after {
+    scale: 1;
+    transition: opacity var(--bili-dur-fast) linear;
+  }
+  #bili-elite-tb .tb-pop,
+  #bili-elite-tb .tb-item.is-open .tb-pop {
+    translate: 0 0;
+    scale: 1;
+    transition:
+      opacity var(--bili-dur-fast) linear,
+      visibility 0s;
+  }
+}
+
+/* ===== 8. 视频页半顶栏（1.1.6 v011）=====
+   `html.bili-elite-vb-half` 由 videoBeta.ts 挂上（要求「顶栏优化 + 播放页优化 +
+   视频页半顶栏」三个开关全开，见那边的 ROOT_HALF）。整条顶栏只画在**右栏推荐流上方**：
+
+     · 左边界 = 播放器右边缘（`--bili-vb-left` + `--bili-vb-gutter`，由 videoBeta.ts 按窗口
+       写），**不留缝、不留圆角**（v012）：以前是「再 +8px 让开一道缝 + 左下 14px 圆弧」，
+       看着像顶栏浮在视频上；现在白底顶栏和右边栏连成一块，左边缘与视频右边缘严丝合缝；
+     · logo / 首页 ∨ / 动态整排不要：左侧本来就是空的，留着只是几颗悬在视频上的字；
+     · 搜索框从「绝对居中的 500px」缩成 36px 高的行内块，塞在右侧图标前面，
+       吃掉中间剩下的全部宽度（`flex: 1 1 auto`）；
+     · 搜索面板比搜索框宽（420），从搜索框右边缘往左展开 —— 面板是按 500 宽设计的，
+       挤在两百多像素里两栏热搜会糊成一片。
+
+   播放页那半边（左栏上移 54px、左右栏间距 24 → 12）在 videoBeta.css §12。
+   半顶栏时宿主只剩右栏那一块，左边视频照旧可点（见 §1 的 pointer-events）。 */
+html.bili-elite-vb-half #bili-elite-tb {
+  /* 视频右边缘 = 左侧 gutter + 左栏宽。**不要在这里再加像素**：加 1px 就是一条白缝 */
+  left: calc(var(--bili-vb-left, 0px) + var(--bili-vb-gutter, 0px));
+}
+/* 毛玻璃那层是单独的 ::before（§5），基础规则里是 border-radius: inherit —— 宿主现在
+   是直角（和右边栏连成一片），这层也跟着归零，别再单独给它圆角。 */
+html.bili-elite-vb-half #bili-elite-tb::before {
+  border-radius: 0;
+}
+html.bili-elite-vb-half #bili-elite-tb .tb-bar {
+  gap: 10px;
+  padding: 0 12px 0 16px;
+}
+html.bili-elite-vb-half #bili-elite-tb .tb-logo,
+html.bili-elite-vb-half #bili-elite-tb .tb-nav {
+  display: none;
+}
+/* 搜索框回到 flex 流里。`translate: none` 必须写：基础规则里它是
+   `translate: -50% 0`（绝对居中那套），不改会把搜索框左移半个宽度。 */
+html.bili-elite-vb-half #bili-elite-tb .tb-search {
+  position: relative;
+  top: auto;
+  left: auto;
+  translate: none;
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+}
+html.bili-elite-vb-half #bili-elite-tb .tb-search-form {
+  height: 36px;
+  border-radius: 18px;
+}
+html.bili-elite-vb-half #bili-elite-tb .tb-search-input {
+  padding-left: 16px;
+  font-size: 13px;
+}
+html.bili-elite-vb-half #bili-elite-tb .tb-search-btn {
+  width: 28px;
+  height: 28px;
+}
+html.bili-elite-vb-half #bili-elite-tb .tb-search-btn::before {
+  width: 16px;
+  height: 16px;
+}
+/* 面板：右边贴住搜索框，往左长到 420（见本节开头第 4 条） */
+html.bili-elite-vb-half #bili-elite-tb .tb-sp {
+  left: auto;
+  right: 0;
+  width: min(420px, calc(100vw - 32px));
+}

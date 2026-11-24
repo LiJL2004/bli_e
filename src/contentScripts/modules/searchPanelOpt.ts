@@ -13,6 +13,10 @@ import { get, onConfigChange } from '../config'
  * .bili-elite-sp-managed 标记，样式里的「常驻 + 动画」只对它生效 —— 脚本没接上时
  * 退回 B 站原生行为。
  *
+ * **自绘顶栏（「顶栏优化」）开着时整个模块不挂**：那时原生顶栏是 visibility:hidden，
+ * 它的搜索框和面板都点不到，挂着只是白留一个盯整个 document 的 subtree 观察器。
+ * 关掉「顶栏优化」退回 B 站原版顶栏时会重新挂上。
+ *
  * 注：「搜索历史」不再折叠。历史区固定为原来的展开高度（172px = 4 行），装不下的
  * 历史直接在区内上下滚动；B 站原生的「展开更多 / 收起」按钮由 topbar.css 隐藏，
  * 本模块也不再自绘折叠控件（原先那套是为了绕开 B 站首次打开时的测量 bug）。
@@ -62,30 +66,45 @@ function collect() {
 }
 
 export function setupSearchPanelOpt(): () => void {
-  const applyRoot = (enabled: boolean) => {
-    document.documentElement.classList.toggle(ROOT_OPT, enabled)
-  }
-  applyRoot(get('searchPanelOpt'))
+  /** 自绘顶栏开着的时候，原生搜索框是 `visibility: hidden`、面板根本点不开 ——
+   *  这套改版样式连同它那个盯整个文档的观察器就纯属白跑，直接不挂（默认配置下就是这种）。
+   *  关掉「顶栏优化」退回 B 站原版顶栏时，这里会通过 onConfigChange 重新挂上。 */
+  const needed = () => get('searchPanelOpt') && !get('customTopbar')
 
-  collect()
-  // 回调里只在面板缺失或已脱离文档时才重新查找，开销很小
-  docObserver = new MutationObserver(() => {
-    if (!panel || !panel.isConnected) collect()
-  })
-  docObserver.observe(document.documentElement, { childList: true, subtree: true })
+  const stopWatch = () => {
+    docObserver?.disconnect()
+    docObserver = null
+  }
+
+  const apply = () => {
+    const on = needed()
+    document.documentElement.classList.toggle(ROOT_OPT, on)
+    if (!on) {
+      stopWatch()
+      attach(null)
+      return
+    }
+    collect()
+    if (docObserver) return
+    // 回调里只在面板缺失或已脱离文档时才重新查找，开销很小
+    docObserver = new MutationObserver(() => {
+      if (!panel || !panel.isConnected) collect()
+    })
+    docObserver.observe(document.documentElement, { childList: true, subtree: true })
+  }
+
+  apply()
 
   const off = onConfigChange((key) => {
-    if (key !== 'searchPanelOpt') return
-    applyRoot(get('searchPanelOpt'))
-    collect()
+    if (key !== 'searchPanelOpt' && key !== 'customTopbar') return
+    apply()
   })
 
   return () => {
     off()
     panelObserver?.disconnect()
-    docObserver?.disconnect()
+    stopWatch()
     panelObserver = null
-    docObserver = null
     if (panel) panel.classList.remove(MANAGED_CLASS, OPEN_CLASS)
     panel = null
     document.documentElement.classList.remove(ROOT_OPT)

@@ -16,8 +16,8 @@ export type PanelParams = Record<PanelParamKey, number>
 export type PanelParamDef = NumberParamDef<PanelParamKey>
 
 export const PANEL_PARAM_DEFS: PanelParamDef[] = [
-  { key: 'blur', label: '面板模糊强度', min: 0, max: 60, step: 1, default: 28, fmt: v => `${v}px` },
-  { key: 'tint', label: '面板遮罩强度', min: 0, max: 100, step: 1, default: 31, fmt: v => `${v}%` },
+  { key: 'blur', label: '模糊强度', min: 0, max: 60, step: 1, default: 28, fmt: v => `${v}px` },
+  { key: 'tint', label: '遮罩强度', min: 0, max: 100, step: 1, default: 31, fmt: v => `${v}%` },
 ]
 
 export const PANEL_STORAGE_KEY = 'bili-elite-panel-params'

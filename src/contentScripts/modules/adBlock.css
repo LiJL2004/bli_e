@@ -1,0 +1,97 @@
+/* ===== 广告与运营推广位屏蔽（默认生效，设置面板里没有开关） =====
+   **原则：按「广告才有的骨架」摘，不按广告主摘。**
+   换广告主只换封面和文案，卡片的 DOM 结构不会变 —— 所以认结构，不认「豆包 / 花生AI / XX」
+   这类名字（按名字摘，下一个广告主就漏）。
+
+   一张信息流广告卡与普通卡的区别，全在**底部那行统计**里（实测 2026-11-07，搜索页）：
+     普通卡  `[播放 icon] 2.7万  [弹幕 icon] 264`
+     广告卡  `[广告] 4000+人感兴趣`  ← 没有播放量/弹幕数，改成一个「广告」标 + 兴趣人数
+   对应的三个可判定特征（任意命中即广告）：
+     1) `.bili-video-card__stats--ad`  —— 那枚「广告」标本身（普通卡不存在）
+     2) `.ad-feedback-entry`           —— 「反馈 / 撤销」的广告反馈入口（普通卡不存在）
+     3) `a[href*="cm.bilibili.com"]`   —— 广告曝光 / 点击上报（cm = 商业广告），
+                                          普通视频链接只会指向 /video/BV…
+   三条各自独立：B 站改掉其中一条，另外两条仍然命中。
+
+   为什么用 display:none 而不是删节点：Vue 的数据还在，删了会被重新渲染回来；
+   摘掉之后推荐流 / 栅格自动回填，不留空洞。
+
+   注意：`:has()` 不能嵌套（`a:has(b:has(c))` 会让整条规则失效），这里都是单层。 */
+
+/* 1) 广告卡：三种骨架特征任意命中就整卡摘掉。
+      限定在「卡片」这一层，避免把装着广告链接的整页容器一起摘了。 */
+/* 三条特征并成一个 :has(:is(...))：浏览器只需要为「广告特征节点」维护一次失效集合，
+   拆成三条 :has() 就是三份。 */
+.bili-video-card:has(:is(.bili-video-card__stats--ad, .ad-feedback-entry, a[href*="cm.bilibili.com"])),
+/* 直播卡 / 播放页右栏卡片是同一套骨架的另外两种外壳。这两处只认「反馈入口」——
+   信息流里的 cm 上报在普通卡上也可能出现（首页实测有），范围收紧一点更稳。 */
+.bili-live-card:has(.ad-feedback-entry),
+.card-box:has(.ad-feedback-entry) {
+  display: none !important;
+}
+
+/* 2) 栅格 / 列表里的一格：**连格子一起摘**。
+      卡片外面还包着壳 —— 搜索页是 `.video-list-item`（`.video-list` 的子项），
+      首页信息流是 `.feed-card` / `.bili-feed-card` 两层。
+
+      **首页必须摘到栅格的直接子项（`.feed-card`），不能只摘里面的 `.bili-feed-card`。**
+      1.2.1 v010 只摘了内层，于是留下「格子还在、里面空了」的洞：推荐栅格是
+      `display: grid`，直接子项默认 `align-self: stretch`，内层 display:none 之后
+      外层高度是 0，却会被**同行其它卡的行高撑满一整格**（实测 299px）—— 不塌陷、
+      也不补位。而且 B 站自己有时会把广告卡的外层藏掉、有时不藏，所以这个洞是
+      「概率」出现的（实测同一页 30 个被摘的格子里只有 1 个漏成洞，就是外层没被藏的那个）。
+
+      首页那批广告**没有**「广告」标、也没有反馈入口（实测 2026-11-07：魔兽世界 / LibTV /
+      千问 / 豆包四条），只有 cm 上报链接 —— 所以这里三条特征都要带上。
+      判据必须与规则 1 完全一致（内层命中什么，外层就得命中什么），否则又会出现
+      「内层被摘、外层留下」的洞。实测同一页 72 个可见格子里，普通卡带 cm 的 0 个，
+      13 个命中全是广告卡（含已隐藏的），没有误伤。 */
+.video-list > *:has(:is(.bili-video-card__stats--ad, .ad-feedback-entry, a[href*="cm.bilibili.com"])),
+.recommended-container_floor-aside .container > *:has(:is(.bili-video-card__stats--ad, .ad-feedback-entry, a[href*="cm.bilibili.com"])),
+.bili-feed-card:has(:is(.bili-video-card__stats--ad, .ad-feedback-entry, a[href*="cm.bilibili.com"])) {
+  display: none !important;
+}
+
+/* 3) 广告位的统一外壳。B 站给每一块投放都套一个 `.ad-report`（里面那个
+      `.ad-report-inner` 才是广告本体，带 `data-loc-id`），播放页右栏顶上那张卡、
+      右下角浮出来的 banner 都是它。摘掉外壳 = 整块广告连占位一起去掉。 */
+.ad-report,
+/* 3.1) 右栏顶上那个「广告 pod」外壳。`.ad-report` 摘掉之后它还剩一条 62px 的空壳
+      （里面只有一个空的弹幕广告盒 `#danmukuBox`），不摘掉就是一块凭空多出来的留白。 */
+.video-pod-above-modules,
+/* 3.2) 搜索页顶部的品牌广告位（实测是个空容器，填上就是一条品牌广告） */
+.brand-ad-list,
+/* 4) 推荐流里的「运营推荐」小卡：360×80，链接带 `playrecommendByOp` /
+      `specialRecommendByOp`（指向别的视频或课堂课程）。 */
+.video-page-operator-card-small,
+/* 5) 兜底：万一上面两个类名都换了，只要卡片里装着带推广标识的链接就摘掉。
+      限定在 `.card-box` 上，避免误伤整页（`:has()` 在大范围选择器上很贵）。 */
+.card-box:has(a[href*="playrecommendByOp"]),
+.card-box:has(a[href*="specialRecommendByOp"]) {
+  display: none !important;
+}
+
+/* 6) 播放页左栏的「推广横幅」—— 两种形态，占的是同一个位置（左栏底部、评论上方）：
+      a. `.activity-m-v1` —— 102px 高的活动横幅（左边一句活动口号「分享科学科普内容，
+         赢丰厚奖金！」，右边活动封面图）；
+      b. `.promo-banner` —— 102px 高的站外推广（「花生AI也能做同款」，整块就是一个
+         `<a href="https://www.huasheng.cn/?jumpfrom=player">`：左边标题 + 副标题，
+         右边封面图）。
+      两者都套在 `.video-resource-list__item` 里，都是运营投放位（每期换一张图、
+      和稿件内容无关），所以一起摘掉。
+
+      为什么藏 item 而不是整块 `.video-resource-list`：这个容器里还可能装
+      稿件自带的资源（素材 / 下载），那是真内容，得留着。
+
+      为什么还要把整块的外边距归零：item 藏掉之后 list 高度是 0，但 B 站给的
+      `margin: 24px 0` 还在 —— 在 beta 的 grid 里就是一条 48px 的空白，
+      比横幅本身还显眼。只在「这块确实有推广位」时归零，其它页面一个像素不动。 */
+.video-resource-list__item:has(.activity-m-v1),
+.video-resource-list__item:has(.promo-banner) {
+  display: none !important;
+}
+
+.video-resource-list:has(.activity-m-v1),
+.video-resource-list:has(.promo-banner) {
+  margin-block: 0 !important;
+}

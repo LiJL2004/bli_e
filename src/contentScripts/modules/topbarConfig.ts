@@ -14,15 +14,28 @@
 
 import { type NumberParamDef, createNumberParamStore } from './paramStore'
 
-export type TopbarParamKey = 'blur' | 'tint'
+export type TopbarParamKey = 'blur' | 'tint' | 'bright'
 
 export type TopbarParams = Record<TopbarParamKey, number>
 
 export type TopbarParamDef = NumberParamDef<TopbarParamKey>
 
 export const TOPBAR_PARAM_DEFS: TopbarParamDef[] = [
-  { key: 'blur', label: '顶栏模糊强度', min: 0, max: 60, step: 1, default: 8, fmt: v => `${v}px` },
-  { key: 'tint', label: '顶栏遮罩强度', min: 0, max: 100, step: 1, default: 7, fmt: v => `${v}%` },
+  { key: 'blur', label: '模糊强度', min: 0, max: 60, step: 1, default: 8, fmt: v => `${v}px` },
+  { key: 'tint', label: '遮罩强度', min: 0, max: 100, step: 1, default: 32, fmt: v => `${v}%` },
+  // 背景明暗：50 为中性，<50 压暗（深色页面更沉），>50 提亮。
+  // 写进 CSS 时换算成 backdrop-filter 的 brightness()：1 + (v - 50) × 0.016，
+  // 默认 50 → 1.0（不动），配上 32% 遮罩正好是「顶栏渐变」想要的观感。
+  {
+    key: 'bright',
+    label: '背景明暗',
+    min: 0,
+    max: 100,
+    step: 1,
+    default: 50,
+    fmt: v => (v < 50 ? `偏暗 ${50 - v}` : v > 50 ? `偏亮 ${v - 50}` : '适中'),
+    edit: { to: v => v - 50, from: n => n + 50 },
+  },
 ]
 
 export const TOPBAR_STORAGE_KEY = 'bili-elite-topbar-params'

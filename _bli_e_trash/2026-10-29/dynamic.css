@@ -1,0 +1,52 @@
+/* ===== 动态页 · 入口收纳 =====
+   只做一件事：把右侧「社区中心」横幅和顶部「发动态」编辑器收成左栏用户卡片里的
+   两个竖排按钮。**不改** B 站的三栏布局、不改动态流列数、不改卡片外观。
+
+   两个原入口不搬 DOM，只加 .bili-elite-dyn-hidden 隐藏（点击由按钮代理过去），
+   这样 B 站改结构时最多是代理失效，不会把节点搬丢。 */
+
+/* 按钮容器：跟在用户卡片原有内容后面，竖排、通栏 —— 原来的左栏只有 228px，
+   卡片右上角没有空白可以绝对定位（会把昵称盖住），所以放在卡片底部更稳 */
+.bili-elite-dyn-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-top: 10px;
+}
+.bili-elite-dyn-actions button {
+  width: 100%;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--bili-dur-fast) var(--bili-ease), box-shadow var(--bili-dur-fast) var(--bili-ease), transform var(--bili-dur-fast) var(--bili-ease-spring);
+}
+.bili-elite-dyn-actions button:active { transform: scale(0.97); }
+.bili-elite-dyn-actions button:focus-visible { outline: 2px solid rgba(10, 108, 255, 0.55); outline-offset: 2px; }
+
+.bili-elite-dyn-actions [data-act="community"] {
+  border: 1px solid rgba(10, 108, 255, 0.28);
+  background: rgba(10, 108, 255, 0.05);
+  color: #0A6CFF;
+}
+.bili-elite-dyn-actions [data-act="community"]:hover { background: rgba(10, 108, 255, 0.11); }
+
+.bili-elite-dyn-actions [data-act="publish"] {
+  border: 0;
+  background: linear-gradient(135deg, #4C9BFF 0%, #0A6CFF 100%);
+  color: #FFFFFF;
+  box-shadow: 0 3px 10px rgba(10, 108, 255, 0.26);
+}
+.bili-elite-dyn-actions [data-act="publish"]:hover {
+  box-shadow: 0 5px 14px rgba(10, 108, 255, 0.36);
+}
+
+/* 被搬成按钮的原入口：留在 DOM 里（点击要代理到它），只是不显示 */
+.bili-elite-dyn-hidden {
+  display: none !important;
+}
