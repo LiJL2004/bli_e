@@ -33,6 +33,7 @@ import { bootstrapSearchCardConfig } from './modules/searchCardConfig'
 import { bootstrapSearchConfig } from './modules/searchConfig'
 import { setupSearchPanelOpt } from './modules/searchPanelOpt'
 import { setupSearchTabs } from './modules/searchTabs'
+import { setupSpaceOptimize } from './modules/spaceOptimize'
 import { setupSelfTopbar } from './modules/selfTopbar'
 import { setupSettingsPanel } from './modules/settingsPanel'
 import { bootstrapTopbarConfig } from './modules/topbarConfig'
@@ -117,6 +118,10 @@ if (IS_TOP) {
   // 搜索页分类标签栏的滑动指示条：样式在 searchOptimize.css 里跟着「搜索页优化」开关，
   // 这里只负责把指示条挂到选中项下并跟着切（非搜索页直接返回，零开销）
   setupSearchTabs()
+
+  // 空间页优化（界面优化）：导航 tab 与排序按钮的样式要在 B 站 mount 之前就位，
+  // 否则会先看到原版的品牌蓝胶囊再跳一下（只在 space.bilibili.com 生效）
+  setupSpaceOptimize()
 
   // 「顶栏优化」：整条顶栏由我们自己画，document_start 就有，不再等 B 站的 header 脚本。
   // 放在 setupTopbarOptimize 之后 —— 它复用 topbar.css 里的频道面板 / 材质 / 夜间样式，

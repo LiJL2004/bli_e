@@ -132,13 +132,6 @@ html.bili-elite-mascot-logo #bili-elite-tb .tb-logo .bili-elite-logo__mark {
   font-size: 14px;
   line-height: 22.4px;
   text-decoration: none;
-  /* 涟漪宿主（1.2.5 v029）：裁切挂在这颗 a 自己身上是安全的 —— 频道面板
-     #bili-elite-home-panel 是它的**兄弟**（同在 .tb-entry 里），不会被裁到。
-     isolation + z -1：涟漪压在底色之上、文字与箭头之下。 */
-  position: relative;
-  overflow: hidden;
-  isolation: isolate;
-  --blie-ripple-z: -1;
   transition:
     color var(--bili-dur-fast) var(--bili-ease),
     background-color var(--bili-dur-fast) var(--bili-ease);
@@ -497,12 +490,6 @@ html.bili-elite-mascot-logo #bili-elite-tb .tb-logo .bili-elite-logo__mark {
   background: #f6f7f8;
   font-size: 12px;
   line-height: 15px;
-  /* 涟漪宿主（1.2.5 v029）：删除角标悬在药丸**外**（right/top -6px），overflow:hidden
-     会把它切掉，改用外扩 8px 的 clip-path 裁涟漪 —— 角标在裁切区内完好，涟漪最多溢出 8px。
-     clip-path 自带层叠上下文，涟漪 z -1 压在药丸底色之上、文字之下。 */
-  clip-path: inset(-8px round var(--bili-radius-sm));
-  isolation: isolate;
-  --blie-ripple-z: -1;
   transition:
     background-color var(--bili-dur-fast) var(--bili-ease),
     color var(--bili-dur-fast) var(--bili-ease);
@@ -569,10 +556,6 @@ html.bili-elite-mascot-logo #bili-elite-tb .tb-logo .bili-elite-logo__mark {
   border-radius: var(--bili-radius-md);
   font-size: 14px;
   line-height: 17px;
-  /* 涟漪宿主（1.2.5 v029）：裁切 + z -1，序号与正文压在波纹之上 */
-  overflow: hidden;
-  isolation: isolate;
-  --blie-ripple-z: -1;
   transition: background-color var(--bili-dur-fast) var(--bili-ease);
 }
 #bili-elite-tb .tb-sp-row.is-hot:hover,
@@ -629,10 +612,6 @@ html.bili-elite-mascot-logo #bili-elite-tb .tb-logo .bili-elite-logo__mark {
   border-radius: var(--bili-radius-md);
   color: inherit;
   text-decoration: none;
-  /* 涟漪宿主（1.2.5 v029）：裁切 + z -1（图标 / 文字 / 未读气泡都压在涟漪之上） */
-  overflow: hidden;
-  isolation: isolate;
-  --blie-ripple-z: -1;
   transition:
     color var(--bili-dur-fast) var(--bili-ease),
     background-color var(--bili-dur-fast) var(--bili-ease);
@@ -692,10 +671,6 @@ html.bili-elite-mascot-logo #bili-elite-tb .tb-logo .bili-elite-logo__mark {
   color: #fff;
   font-size: 13px;
   text-decoration: none;
-  /* 涟漪宿主（1.2.5 v029）：白色 currentColor 的波纹落在粉色胶囊上，形态不变 */
-  overflow: hidden;
-  isolation: isolate;
-  --blie-ripple-z: -1;
   transition: background-color var(--bili-dur-fast) var(--bili-ease);
 }
 #bili-elite-tb .tb-upload:hover {
@@ -748,10 +723,6 @@ html.bili-elite-tb-no-upload #bili-elite-tb .tb-upload {
   border-radius: var(--bili-radius-md);
   color: inherit;
   text-decoration: none;
-  /* 涟漪宿主（1.2.5 v029），同 `.tb-icon` 那一套 */
-  overflow: hidden;
-  isolation: isolate;
-  --blie-ripple-z: -1;
   transition:
     color var(--bili-dur-fast) var(--bili-ease),
     background-color var(--bili-dur-fast) var(--bili-ease);

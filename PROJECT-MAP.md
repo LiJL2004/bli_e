@@ -61,6 +61,7 @@
 | └ 投稿按钮移除 | `uploadBtnHide` | 全站 | `selfTopbar.ts` | `selfTopbar.css` §4 |
 | 首页优化 | `homeOptimize` | 首页 | `topbarOptimize.ts` | `homeOptimize.css` + `topbar.css`（首页段 / §12 / §16）；卡片大小 `homeCardConfig.ts` |
 | 搜索页优化 | `searchOptimize` | 搜索页 | `topbarOptimize.ts`（筛选按钮 + 分类标签的涟漪安装）；指示条定位 `searchTabs.ts` | `searchOptimize.css`（栅格 + 筛选按钮 + 分类标签栏）；卡片大小 `searchCardConfig.ts` |
+| 空间页优化 | `spaceOptimize` | 个人空间 `space.bilibili.com` | `spaceOptimize.ts`（注入样式 + 三类控件涟漪） | `spaceOptimize.css`（侧边分类 / 排序胶囊 / 播放全部） |
 | 搜索面板优化 | `searchPanelOpt` | 顶栏搜索面板 | `searchPanelOpt.ts` | `topbar.css` §9 |
 | 播放页优化 | `videoBeta` | 播放页（番剧页排除） | `videoBeta.ts` | `videoBeta.css`；右栏封面 `railCardConfig.ts` |
 | └ 评论预加载 | `videoCommentPreload` | 播放页 | `commentPreload.ts` | `videoBeta.css` §13 |
@@ -160,6 +161,7 @@ scripts/                    prepare / manifest / pack-edge / pack-source / zip
 | `settingsPanel.ts` | 设置面板（Shadow DOM）+ 恢复默认 + 「新版本改动」页 + 节点测速卡 |
 | `ripple.ts` / `ripple.css` | Material 涟漪：`installRipple(root, selector)` 装监听并把它唯一的 CSS 注入同一个根（面板 shadow / document）；差异用宿主上的 `--blie-ripple-color` / `--blie-ripple-z` |
 | `searchTabs.ts` | 搜索页分类标签栏的滑动指示条（量选中项位置写 translateX / width） |
+| `spaceOptimize.ts` | 空间页：侧边分类 / 排序胶囊 / 播放全部换 Google 观感（纯 CSS + 涟漪）；注入 `spaceOptimize.css` |
 | `floatingButtons.ts` | 右下角操作浮钮（返回顶部 / 刷新 / 夜间模式） |
 | `floatDock.ts` | 浮钮收纳：自动隐藏 / 半隐藏（唯一实现） |
 | `quickWheel.ts` | 功能轮盘：呼出、选格、跳转 |
@@ -251,7 +253,8 @@ scripts/                    prepare / manifest / pack-edge / pack-source / zip
 > 各自有自己的 `.is-night` 配色，改夜间要一处一处确认，别只改 `night.css`。
 
 其余样式表都是一件事一个文件，看名字即可：`designTokens.css`（动效 / 圆角 token）、`adBlock.css`、
-`homeOptimize.css`（首页）、`searchOptimize.css`（搜索页：栅格 / 排序栏按钮 / 分类标签栏）、`dynamicOverlay.css`、`floatingButtons.css`、`quickWheel.css`、
+`homeOptimize.css`（首页）、`searchOptimize.css`（搜索页：栅格 / 排序栏按钮 / 分类标签栏）、
+`spaceOptimize.css`（空间页：导航 tab / 排序按钮）、`dynamicOverlay.css`、`floatingButtons.css`、`quickWheel.css`、
 `panelButton.css`（只放 ⚙ 按钮，面板 CSS 要等第一次打开才注入）、`ripple.css`（涟漪节点，全仓库唯一一份，由 `installRipple` 注入）。
 
 ---

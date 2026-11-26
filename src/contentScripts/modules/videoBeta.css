@@ -1098,6 +1098,7 @@ html.bili-elite-video-beta.bili-elite-vb-immersive .bili-elite-vb-topics {
    2. **收起态**（`html.bili-elite-vb-desc-folded`，由 videoBeta.ts 读 B 站自己的行内 height 挂）：
       整张卡可点、鼠标移上去高亮。点下去由 videoBeta.ts 转交给 B 站原生的 `.toggle-btn` ——
       所以「展开更多 / 收起」还是简介左下角那颗原版按钮，文案、阈值（3.5 行）、高度都由 B 站维护。
+      **点卡片展开不画涟漪**（1.2.5 v033）：涟漪只挂在按钮文字上，见 videoBeta.ts 的 onDescClick。
 
    **别在这里写 max-height / height**：v018 曾经用 `max-height` 把正文压到 2 行，而 B 站
    `checkIfDescInfoCanBeFolded` 量的就是 `getBoundingClientRect().height` —— 被压成 52px 之后
@@ -1138,16 +1139,30 @@ html.bili-elite-video-beta:not(.bili-elite-vb-immersive).bili-elite-vb-desc-fit 
 /* 11.2 「展开更多 / 收起」按钮的点击涟漪（1.2.5 v029）：
    按钮本体仍是 B 站的（文案 / 阈值 / 行内高度都归它管，见 §11 开头），这里只加
    涟漪宿主要的三样：定位锚、裁切、内容压在波纹之上（isolation + z -1）。
-   灰底卡片上 currentColor（灰字）的波纹看不出来，波纹色固定用 B 站品牌蓝。 */
+   **颜色用灰色（v031）**：不再写 `--blie-ripple-color`，直接回落 ripple.css 的默认值
+   `currentColor` —— 就是按钮文字那个灰（#222 的 0.3 透明度），灰底卡片上是一层柔和的
+   灰影。v029~v030 用品牌蓝 `#00aeec`，用户嫌跳，要求改回灰的。
+
+   宽度必须收成文字宽（v030）：B 站这颗是 `display: block`、宽度撑满整行（实测 1070px），
+   涟漪半径 = max(宽,高) × 2.2 ≈ 2350px —— 点一下从点击点炸满整行，和 YouTube「只有文字处」
+   完全不一样（用户报的「动画范围太大」）。`fit-content` 之后宽度只剩文字本身的 56px
+   （实测盒 56×20、涟漪半径 123px），**文字位置一个像素都不动** —— 别再给它加 padding /
+   负 margin 去「撑大热区」，实测那样会把按钮整体顶高 10px（父级布局跟着变）。 */
 html.bili-elite-video-beta:not(.bili-elite-vb-immersive) #v_desc > .toggle-btn {
   position: relative;
   overflow: hidden;
   isolation: isolate;
+  width: fit-content;
+  /* B 站这颗按钮原生是 `cursor: auto`（实测），以前整卡可点时靠 `#v_desc` 那条 pointer
+     兜住；v030 收窄到文字之后必须自己补上，否则看不出「展开更多」能点 */
+  cursor: pointer;
   --blie-ripple-z: -1;
-  --blie-ripple-color: #00aeec;
 }
 
-/* 收起态 = 可点：指针 + 悬停高亮（展开态不挂这两条，所以不会高亮） */
+/* 11.3 收起态 = 整张卡可点（1.2.5 v029 的规则，v033 恢复）：指针 + 悬停高亮。
+   展开态不挂这两条 —— 那时点卡片应该能选中文字、点简介里的链接。
+   注意这一条只负责「看起来能点」，真正把点击转交给 B 站按钮的是 videoBeta.ts 的
+   onDescClick（它用 detail:1 派发，所以点卡片不会冒出涟漪）。 */
 html.bili-elite-video-beta:not(.bili-elite-vb-immersive).bili-elite-vb-desc-folded #v_desc {
   cursor: pointer;
   transition: background-color var(--bili-dur-fast) var(--bili-ease);

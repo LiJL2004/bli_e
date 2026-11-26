@@ -404,7 +404,7 @@ const NAV_ICONS: Record<string, string> = {
  * 每改一次代码把 v 后面 +1（v001 → v002 …），正式版本号升级时才重置回 v001。
  * 规则写在 `.opencode/skills/bili-elite/SKILL.md` 的「版本、发布与图标」一节。
  */
-const DEV_VERSION = '1.2.5 v029'
+const DEV_VERSION = '1.2.5 v034'
 
 
 

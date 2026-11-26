@@ -1,0 +1,176 @@
+/* ===== 空间页优化（1.2.5 v034）=====
+   把空间页（space.bilibili.com）里的三类控件换成设置面板同一套 Google 观感
+   （panel.css 的 `.nav-item` / `.text-btn`）：
+
+   1. 侧边分类 `.side-nav__item`（动态页「全部 / 视频」，投稿页「视频 / 图文 / 音频」…）
+      → 胶囊 999px + 悬停 8% 状态层 + 选中 #D3E3FD 底 / #1A73E8 字。
+      **v034 按用户要求改小改大**：按钮本身变小（52px 高 → 40、不再撑满 150px 宽，
+      改成 `width: fit-content`），字号变大（14px → 16px），数字与文字的距离收成 8px
+      （原来靠 `space-between` 顶到两端）。动态页与投稿页是同一个组件，规则一致、
+      改完两边大小位置自然一样。
+   2. 「播放全部」`.playall-btn`（投稿 / 收藏等子页右上角）
+      → 面板 `.text-btn` 那套：胶囊、#D3E3FD 底 + #1A73E8 字、13px/600、悬停 8% 状态层。
+      高度沿用 B 站的 34px，不动周围对齐。
+   3. 排序 / 筛选胶囊 `.radio-filter__item`（投稿页「最新发布 / 最多播放 / 最多收藏」、
+      收藏页「最近收藏 / 最多播放 / 最近投稿」、追番页「全部 / 想看 / 在看 / 看过」…）
+      → 白底 + 1px #DADCE0 描边的胶囊 chip，悬停 #F1F3F4，选中 #D3E3FD 底 + #1A73E8 字。
+      所有子页共用这一个类名，改一处全站生效（已逐页核对：/upload/video、/favlist、/bangumi）。
+
+   **v032 改过顶部导航 tab，v033 已回退**（导航指示条的 left / width 由 B 站 JS 写，
+   字号 / 内边距一动就和文字错位）。别再改那处。
+
+   B 站原样（实测）：
+   · .side-nav__item  150×52 / padding 14 16 / 6px 圆角 / 14px 字；
+     选中是品牌蓝实心块 + 白字，未选中透明底 + #18191C 字、数量 #61666D；
+     带 `transition: background-color .3s` —— **必须 `transition: none`**，
+     否则颜色覆盖会被卡住（v032 在排序按钮上踩过同一个坑）。
+   · .playall-btn  100×34 / padding 0 12 / 8px 圆角 / 白底 + 1px #E3E5E7 描边 / #18191C 字
+   · .radio-filter__item  34px 高 / padding 0 15 / 6px 圆角；
+     未选中 #F6F7F8 底 + #61666D 字，选中 #00AEEC 底 + 白字 */
+
+/* ---------- 1. 侧边分类 ----------
+   容器改成单列 grid（`max-content`）：同一组里的按钮**自动等宽**（取最宽的那个），
+   「音频 0」这种一位数字的不会比「图文 15」窄一截。用户明确要求「大小位置保持一致」，
+   靠 min-width 猜数字位数不行 —— 动态页的「全部」可能带三位数。 */
+html.bili-elite-space .side-nav {
+  display: grid;
+  grid-template-columns: max-content;
+}
+
+html.bili-elite-space .side-nav__item {
+  position: relative;
+  overflow: hidden;
+  /* 按钮变小：不再撑满侧栏的 150px，宽度由上面那列 grid 决定 */
+  justify-content: flex-start;
+  height: 40px;
+  padding: 0 16px;
+  gap: 8px;
+  align-items: center;
+  box-sizing: border-box;
+  border-radius: 999px;
+  isolation: isolate;
+  --blie-ripple-z: -1;
+  -webkit-tap-highlight-color: transparent;
+  /* 见文件开头：B 站的 background-color .3s 会把下面的覆盖卡在旧值 */
+  transition: none !important;
+}
+
+/* 悬停 / 按下状态层（与面板 .nav-item::before 一致：currentColor 8% / 12%） */
+html.bili-elite-space .side-nav__item::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: currentColor;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+
+html.bili-elite-space .side-nav__item:hover::before {
+  opacity: 0.08;
+}
+
+html.bili-elite-space .side-nav__item:active::before {
+  opacity: 0.12;
+}
+
+/* 字号变大（14 → 16）；未选中仍是黑字 + 灰数量 */
+html.bili-elite-space .side-nav__item .side-nav__item__main-text {
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 500;
+}
+
+html.bili-elite-space .side-nav__item .side-nav__item__sub-text {
+  font-size: 16px;
+  line-height: 20px;
+}
+
+/* 选中：浅蓝底 + 品牌蓝字（B 站原本是实心蓝底白字，一并换掉） */
+html.bili-elite-space .side-nav__item.active {
+  background-color: #d3e3fd !important;
+}
+
+html.bili-elite-space .side-nav__item.active::before {
+  display: none;
+}
+
+html.bili-elite-space .side-nav__item.active .side-nav__item__main-text,
+html.bili-elite-space .side-nav__item.active .side-nav__item__sub-text {
+  color: #1a73e8 !important;
+  font-weight: 600;
+}
+
+/* ---------- 2. 「播放全部」 ---------- */
+html.bili-elite-space .playall-btn {
+  position: relative;
+  overflow: hidden;
+  height: 34px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: #d3e3fd;
+  color: #1a73e8;
+  font-size: 13px;
+  font-weight: 600;
+  isolation: isolate;
+  --blie-ripple-z: -1;
+  -webkit-tap-highlight-color: transparent;
+  transition: none !important;
+}
+
+html.bili-elite-space .playall-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: currentColor;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+
+html.bili-elite-space .playall-btn:hover::before {
+  opacity: 0.08;
+}
+
+html.bili-elite-space .playall-btn:active::before {
+  opacity: 0.12;
+}
+
+/* 图标（▶）跟着文字色走；B 站只给了它 font-size，没有内联 color */
+html.bili-elite-space .playall-btn .vui_icon {
+  color: inherit;
+}
+
+/* ---------- 3. 排序 / 筛选胶囊 ----------
+   白底 + 描边：这几排按钮下面就是白色内容区，透明底会让未选中的看起来像普通文字
+   （v032 在投稿页实测过），描边 chip 才有控件感。选中时描边改透明而不是去掉 ——
+   保持盒宽一致，切换时不跳。 */
+html.bili-elite-space .radio-filter__item {
+  position: relative;
+  overflow: hidden;
+  height: 34px;
+  padding: 0 16px;
+  border: 1px solid #dadce0;
+  border-radius: 999px;
+  background-color: #fff;
+  color: #202124;
+  font-weight: 500;
+  isolation: isolate;
+  --blie-ripple-z: -1;
+  -webkit-tap-highlight-color: transparent;
+  transition: none !important;
+}
+
+html.bili-elite-space .radio-filter__item:hover {
+  background-color: #f1f3f4;
+}
+
+html.bili-elite-space .radio-filter__item.radio-filter__item--active {
+  border-color: transparent;
+  background-color: #d3e3fd;
+  color: #1a73e8;
+  font-weight: 600;
+}

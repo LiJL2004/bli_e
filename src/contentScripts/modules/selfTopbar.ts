@@ -1567,9 +1567,13 @@ function apply(enabled: boolean) {
   }
 }
 
-/** 参与涟漪的控件（浮层 + 顶栏本体 + 搜索面板词条，1.2.5 v029 扩）。
+/** 参与涟漪的控件：**只限顶栏弹出来的浮层**（1.2.5 v030 收窄）。
  *  设置面板那套选择器在这边一个都不命中，所以单独给一份。
- *  顶栏关掉时这些选择器一个都不命中，监听留着没有副作用（见 setupSelfTopbar 的注释）。 */
+ *  顶栏关掉时这些选择器一个都不命中，监听留着没有副作用（见 setupSelfTopbar 的注释）。
+ *
+ *  v029 曾经把顶栏本体按钮（首页 / 动态 / 右侧图标 / 登录 / 投稿）和搜索面板的
+ *  历史药丸 / 热搜词条也加进来，用户反馈「点击特效太多」→ v030 全部撤掉，
+ *  只保留悬停才出现的那几个浮层。别再顺手加回去。 */
 const TOPBAR_RIPPLE = [
   '.tb-pop-tab', // 视频 / 直播 / 番剧 等分类
   '.tb-pop-action', // 「查看全部」「播放全部」
@@ -1577,12 +1581,6 @@ const TOPBAR_RIPPLE = [
   '.tb-media', // 动态 / 历史 / 收藏的内容卡
   '.tb-media-del', // 历史卡的删除按钮
   '.tb-pop-empty a', // 空态里的「去登录」
-  '.tb-entry > a', // 首页 / 动态（顶栏按钮，v029）
-  '.tb-icon', // 右侧 消息 / 动态 / 收藏 / 历史 图标（v029）
-  '.tb-login', // 未登录的人像按钮（v029）
-  '.tb-upload', // 投稿胶囊（v029）
-  '.tb-sp-chip', // 搜索面板的搜索历史药丸（v029）
-  '.tb-sp-hot-col .tb-sp-row', // 搜索面板的热搜词条（不含联想行，v029）
 ].join(',')
 
 export function setupSelfTopbar(): () => void {
@@ -1598,9 +1596,8 @@ export function setupSelfTopbar(): () => void {
   apply(get('customTopbar'))
 
   /**
-   * 浮层里的按钮走和设置面板同一套涟漪（见 ripple.ts / selfTopbar.css §4.1.6）；
-   * v029 起顶栏按钮（首页 / 动态 / 右侧图标 / 登录 / 投稿）和搜索面板的
-   * 历史药丸 / 热搜词条也进同一份选择器。
+   * 浮层里的按钮走和设置面板同一套涟漪（见 ripple.ts / selfTopbar.css §4.1.6）。
+   * 顶栏本体按钮 / 搜索面板词条**不装**（v030 撤掉，见 TOPBAR_RIPPLE 的注释）。
    * 挂 document：浮层是 hover 时动态渲染的，事件委托才不用每次重建监听。
    * 顶栏关掉时这些选择器一个都不命中，监听留着没有副作用。
    */

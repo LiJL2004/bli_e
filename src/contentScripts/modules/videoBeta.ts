@@ -239,12 +239,12 @@ const NODESC_CLASS = 'bili-elite-vb-nodesc'
 const DESC_TOGGLE = ':scope > .toggle-btn'
 /** 「展开更多 / 收起」按钮的涟漪选择器（1.2.5 v029）：同一颗原版按钮，closest 能带 > 子级选择器 */
 const DESC_RIPPLE = '#v_desc > .toggle-btn'
-/** B 站此刻处于收起态（可展开）：整张卡可点、悬停高亮 */
+/** B 站此刻处于收起态（可展开）：整张卡可点、悬停高亮（1.2.5 v033 恢复） */
 const DESC_FOLDED = 'bili-elite-vb-desc-folded'
 /**
  * 「这篇简介根本不用展开」：正文在当前宽度下整段都装得进 B 站的折叠高度。
  * 挂上之后 CSS 把行内 height 放开、把「展开更多 / 收起」藏掉（判定见 needDescFit）。
- * 状态类挂 `<html>` 上而不是 `#v_desc` 上，理由同 DESC_FOLDED（Vue 换节点时类不会丢）。
+ * 状态类挂 `<html>` 上而不是 `#v_desc` 上：Vue 换掉那个节点时类不会丢。
  */
 const DESC_FIT = 'bili-elite-vb-desc-fit'
 /** B 站的折叠阈值：3.5 行（实测 1600 宽 84px = 3.5×24、2200 宽 91px = 3.5×26） */
@@ -1223,7 +1223,9 @@ function pumpSettle() {
  *      正文位置显示 `~`。
  *   2. **收起态**：B 站自己的折叠是「超过 3.5 行 → 行内 `height` 写成 3.5 × 行高，
  *      `#v_desc` 末尾渲染出 `.toggle-btn`」，展开时行内 `height` 写回 `auto`。
- *      这里只把「此刻是收起态」翻译成 `<html>` 上的一个类，CSS 拿它挂指针和悬停高亮。
+ *      这里只把「此刻是收起态」翻译成 `<html>` 上的一个类，CSS 拿它挂指针和悬停高亮，
+ *      点击委托见 onDescClick（整张卡 / 播放数据那一行都能点开，1.2.5 v033 恢复）。
+ *      注意：**点卡片触发的展开不画涟漪**，只有直接点按钮文字才有（见 onDescClick 里的 detail:1）。
  *   3. **根本不用展开**（`bili-elite-vb-desc-fit`，1.2.1 v003）：见 needDescFit。
  *
  * **别在这里写 max-height / height**：v018 曾经用 `max-height` 把正文压到 2 行，而 B 站
@@ -1266,6 +1268,38 @@ function syncDesc() {
   // 「装得下」时不再挂 folded：卡片不该有指针 / 悬停高亮（点了也没东西可展开）
   root.classList.toggle(DESC_FOLDED, folded && !descFit)
   root.classList.toggle(DESC_FIT, descFit)
+}
+
+/**
+ * 点简介卡（灰色区域 / 播放数据那一行）= 展开。**展开这件事仍然由 B 站做**：直接点它自己的
+ * `.toggle-btn`，于是折叠状态、行内高度、按钮文案全都由 B 站维护，我们一个字节都不写。
+ *
+ * 委托在 document 上而不是绑到 `#v_desc`：Vue 把那个节点换掉时不用重绑。
+ * 展开态不接管 —— 要能选中文字、点简介里的链接；点在按钮自己身上也放过
+ * （它自己有 click 处理，再点一次就是切换两次 = 没反应）。
+ *
+ * **点卡片不画涟漪（1.2.5 v033）**：这里不能调 `btn.click()` —— 它派发的 click 是 `detail: 0`，
+ * 会被 ripple.ts 当成「键盘 / 脚本触发」再补一颗从按钮中心扩散的涟漪，用户就会看到
+ * 「点卡片 → 按钮上莫名冒一圈波纹」。改成手动派发 `detail: 1` 的合成 click：
+ * B 站的 @click 照常触发（它不看 detail），涟漪那条路径则直接跳过。
+ */
+function onDescClick(e: MouseEvent) {
+  const root = document.documentElement
+  // 宽屏 / 网页全屏下信息区整套交回 B 站，不接管点击
+  if (root.classList.contains(ROOT_IMMERSIVE) || !root.classList.contains(DESC_FOLDED)) return
+  const target = e.target instanceof Element ? e.target : null
+  const desc = document.getElementById(DESC_ID)
+  // 播放数据那一行是卡片的**兄弟**（叠在同一格），视觉上属于卡片，点它也算点卡片
+  const hit = target?.closest(`#${DESC_ID}`) || target?.closest(META_SELECTOR)
+  if (!desc || !hit) return
+  if (target?.closest('a, img, .toggle-btn')) return
+  // 拖选简介里的文字时不要顺手展开
+  if ((window.getSelection()?.toString() || '').trim()) return
+  const btn = desc.querySelector<HTMLElement>(DESC_TOGGLE)
+  if (!btn) return
+  btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }))
+  // B 站改的是行内 height（属性变动观察不到），下一帧把「收起态」同步回来
+  requestAnimationFrame(syncDesc)
 }
 
 /**
@@ -1346,33 +1380,6 @@ function unwatchDescSize() {
     cancelAnimationFrame(rafDesc)
     rafDesc = 0
   }
-}
-
-/**
- * 点简介卡（灰色区域）= 展开。**展开这件事仍然由 B 站做**：直接点它自己的 `.toggle-btn`，
- * 于是折叠状态、行内高度、按钮文案全都由 B 站维护，我们一个字节都不写。
- *
- * 委托在 document 上而不是绑到 `#v_desc`：Vue 把那个节点换掉时不用重绑。
- * 展开态不接管 —— 要能选中文字、点简介里的链接；点在按钮自己身上也放过
- * （它自己有 click 处理，再点一次就是切换两次 = 没反应）。
- */
-function onDescClick(e: MouseEvent) {
-  const root = document.documentElement
-  // 宽屏 / 网页全屏下信息区整套交回 B 站，不接管点击
-  if (root.classList.contains(ROOT_IMMERSIVE) || !root.classList.contains(DESC_FOLDED)) return
-  const target = e.target instanceof Element ? e.target : null
-  const desc = document.getElementById(DESC_ID)
-  // 播放数据那一行是卡片的**兄弟**（叠在同一格），视觉上属于卡片，点它也算点卡片
-  const hit = target?.closest(`#${DESC_ID}`) || target?.closest(META_SELECTOR)
-  if (!desc || !hit) return
-  if (target?.closest('a, img, .toggle-btn')) return
-  // 拖选简介里的文字时不要顺手展开
-  if ((window.getSelection()?.toString() || '').trim()) return
-  const btn = desc.querySelector<HTMLElement>(DESC_TOGGLE)
-  if (!btn) return
-  btn.click()
-  // B 站改的是行内 height（属性变动观察不到），下一帧把「收起态」同步回来
-  requestAnimationFrame(syncDesc)
 }
 
 /**
@@ -2407,8 +2414,9 @@ function start() {
     document.addEventListener('click', onDescClick)
     descClickBound = true
   }
-  // 简介按钮的涟漪也委托在 document 上（样式挂点在 videoBeta.css §11；
-  // 点灰色卡片展开时 onDescClick 会替它点一下按钮，detail=0 那条路径顺带从按钮中心也补一颗涟漪）
+  // 简介按钮的涟漪也委托在 document 上（样式挂点在 videoBeta.css §11.2）。
+  // **只认 B 站那颗原版 `.toggle-btn`**：点卡片展开走 onDescClick 的 detail:1 派发，
+  // 不会命中涟漪这条路径（见 onDescClick 的注释）
   if (!offDescRipple)
     offDescRipple = installRipple(document, DESC_RIPPLE)
   syncDesc()

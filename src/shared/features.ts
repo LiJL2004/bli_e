@@ -83,6 +83,12 @@ export const FEATURES = [
   // 换成与首页同一套 auto-fill，留白也从写死的 96px 换成响应式窄栏；
   // 带「卡片大小」滑块（searchCardConfig.ts），默认值与首页那张卡一致（350px）。
   { key: 'searchOptimize', label: '搜索页优化', default: true, group: '界面优化' },
+  // 空间页优化（1.2.5 v033）：个人空间（space.bilibili.com）的「侧边分类」与「播放全部」
+  // 换成设置面板同一套 Google 观感（胶囊 + #D3E3FD / #1A73E8 + 涟漪，样式 spaceOptimize.css）。
+  // **v032 的导航 tab / 排序按钮改造已全部回退**（B 站自己的布局太紧，改颜色不划算）。
+  // 只在 space.bilibili.com 生效，关掉之后一个字节都不改。
+  { key: 'spaceOptimize', label: '空间页优化', default: true, group: '界面优化',
+    hint: '个人空间的侧边分类与「播放全部」换成统一的 Google 风格控件' },
   { key: 'searchPanelOpt', label: '搜索面板优化', default: true, group: '界面优化' },
   // 播放页优化（1.1.4 从「实验室 → 播放页beta」转正并改名）：把播放页从「居中 + 大留白」改成满宽
   // （播放器吃掉右栏之外的全部宽度），标题 / 播放数据 / UP 主 / 操作栏按经典版顺序
