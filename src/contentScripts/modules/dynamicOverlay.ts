@@ -107,6 +107,14 @@ const SKIP_SELECTOR = [
   '.bili-dyn-item__footer',
   '.bili-dyn-item__action',
   '.bili-dyn-action',
+  // 卡片里展开的评论区：`bili-comments` 是 web component，内部是 shadow DOM，
+  // document 捕获阶段 `event.target` 被重定向成 host 本身，只能认这个标签名；
+  // 外层容器一起列上，评论输入框 / 「展开更多」那些 light DOM 部分也一并挡住。
+  // （不挡的话点评论正文 = 点这条动态 → 弹出动态悬浮窗，评论根本没法看。）
+  'bili-comments',
+  '.bili-comments',
+  '.bili-comment-container',
+  '#commentapp',
   // 图片 / 相册 / 视频 / 直播 / 番剧 / 专栏 / 外链卡等有自己点击目标的卡片
   '.bili-album',
   '.dyn-card-opus__pics',
@@ -1513,7 +1521,11 @@ export function setupDynamicOverlay(): () => void {  let ui: OverlayUi | null = 
     // 正在选字（拖选 / 双击选词）时不要抢走鼠标松开那一下
     if (window.getSelection()?.toString()) return
 
+    // 只接管动态流里的卡片。顶栏悬浮窗（历史 / 收藏）、页面其它位置的视频链接都不归这里 ——
+    // 那里点视频本来就是「开新标签页去播放页」，接管了就会变成「视频页照常打开 + 这边再弹一个悬浮窗」。
     const item = target.closest<HTMLElement>('.bili-dyn-item')
+    if (!item) return
+
     // 直播 / 直播回放整条不接管：让 B 站原生跳转去直播站（见 isLiveItem 的注释）
     if (isLiveItem(item)) return
 
@@ -1529,7 +1541,7 @@ export function setupDynamicOverlay(): () => void {  let ui: OverlayUi | null = 
       return
     }
 
-    if (!item || !item.querySelector('.bili-dyn-time')) return
+    if (!item.querySelector('.bili-dyn-time')) return
     if (target.closest(SKIP_SELECTOR)) return
 
     const url = resolveDetailUrl(item)

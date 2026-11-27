@@ -1,6 +1,7 @@
 import { get } from '../config'
 import { EventBag } from '../eventBag'
 import { prefersReducedMotion } from './designTokens'
+import { openSelfViewer, toOriginalImageUrl, type SelfViewerItem } from './imageViewerSelf'
 
 const DRAG_THRESHOLD = 10
 const POLL_TIMEOUT = 800
@@ -9,19 +10,23 @@ export const IMAGE_EASE = 'cubic-bezier(0.25, 0.46, 0.45, 0.94)'
 export const IMAGE_DUR_OPEN = 330
 export const IMAGE_DUR_CLOSE = 290
 
-// 动态页（t.bilibili.com）的相册组件 `bili-album` 是「两步」打开大图的：
+// 动态页（t.bilibili.com）的相册组件 `bili-album` 原生是「两步」打开大图的：
 //   ① 点缩略图 → 卡片内联展开（`.bili-album__watch` 显示，自带一条
 //      「收起 / 查看大图 / 向左旋转 / 向右旋转」工具栏），此时**还没有** PhotoSwipe；
 //   ② 点工具栏「查看大图」→ 才创建 `.pswp`。
-// 第二步的点击目标是个 <div>，composedPath 里根本没有 <img>，原来那套
-// 「点到的图片当 FLIP 起点」的逻辑会直接 return，于是打开 / 关闭都是硬切。
-// 这里补上相册这一路：按钮点击时把相册内联展示的那张大图当起点，
-// 关闭时再回到同一张图（关掉大图后内联态仍在，位置不变）。
+// ① 那层中间态是纯多余的：用户点图就是想看大图。现在①被接管 —— 拦住缩略图那一下，
+// 直接把整个相册丢给**自绘查看器**（`imageViewerSelf.ts`，见 openAlbumSelf），
+// 内联态一次都不出现，也不再借官方 PhotoSwipe。
+//
+// ② 那一下仍然要认：内联态已经展开（从别的入口进来的）时点「查看大图」，点击目标是个
+// <div>，composedPath 里根本没有 <img>，原来那套「点到的图片当 FLIP 起点」的逻辑会直接
+// return，打开 / 关闭都变成硬切。所以按钮点击时把相册内联展示的那张大图当起点，
+// 关闭时再回到同一张图（这条路仍是官方 pswp + 我们的 FLIP）。
 const ALBUM = '.bili-album'
 const ALBUM_WATCH = '.bili-album__watch'
-const ALBUM_PREVIEW = '.bili-album__preview'
 const ALBUM_BIG_BTN = '.bili-album__watch__control__option.full-screen'
 const ALBUM_INLINE_IMG = '.bili-album__watch__content img'
+const ALBUM_PIC = '.bili-album__preview__picture'
 
 export function setupImageViewer(): () => void {
   const bag = new EventBag()
@@ -175,12 +180,53 @@ export function setupImageViewer(): () => void {
     })
   }
 
-  // 相册缩略图点击只是卡片内联展开（不创建 PhotoSwipe），
-  // 所以既不记 rect 也不上锁——否则紧跟着点「查看大图」会被锁吞掉。
-  function isAlbumPreviewClick(target: HTMLElement | null) {
-    const preview = target?.closest?.(ALBUM_PREVIEW)
-    if (!preview) return false
-    return !!preview.closest(ALBUM)?.querySelector(ALBUM_WATCH)
+  /**
+   * 点在「相册缩略图」上吗 —— 是就返回这张图、它所在的相册和屏幕位置。
+   *
+   * 只认 `.bili-album__preview` 那层缩略图（内联态展开后这一层被盖住，点不到）。
+   * 拿不到「查看大图」按钮就返回 null（组件换版 / 别的站点也用这套相册）——
+   * 交回 B 站，免得把图点成「点了没反应」。
+   */
+  function albumThumbOf(target: HTMLElement | null) {
+    const pic = target?.closest?.(ALBUM_PIC)
+    if (!pic) return null
+    const album = pic.closest(ALBUM)
+    if (!album || !album.querySelector(ALBUM_BIG_BTN)) return null
+    const img = pic.querySelector<HTMLImageElement>('img')
+    if (!img) return null
+    const rect = img.getBoundingClientRect()
+    if (rect.width < 20 || rect.height < 20) return null
+    return { album, img, rect }
+  }
+
+  /**
+   * 相册 → **自绘查看器**（v037）。
+   *
+   * v035 那版是「替用户点掉 B 站的『查看大图』」，借官方 PhotoSwipe 显示；现在整套换成
+   * `imageViewerSelf.ts` 自己画的一层 —— 缩放 / 旋转 / 点图不触发都在本地 `transform`
+   * 里做，不用再绕 `window.pswp`、不用 guard.js 代劳。
+   *
+   * 相册里每张图都带上**点击那一刻的屏幕位置**：只有被点的那张有意义，其余为 null，
+   * 打开 / 关闭的 FLIP 起点就取它。
+   */
+  function openAlbumSelf(t: { album: Element; img: HTMLImageElement; rect: DOMRect }) {
+    const list: SelfViewerItem[] = []
+    for (const pic of Array.from(t.album.querySelectorAll(ALBUM_PIC))) {
+      const im = pic.querySelector<HTMLImageElement>('img')
+      const raw = im ? (im.currentSrc || im.src || '') : ''
+      if (!raw) continue
+      const r = im?.getBoundingClientRect()
+      list.push({
+        src: toOriginalImageUrl(raw),
+        thumb: raw,
+        rect: r && r.width > 8 && r.height > 8 ? r : null,
+        el: im,
+      })
+    }
+    if (!list.length) return
+    // 序号用原图地址对齐（缩略图可能带不同尺寸后缀，统一先转原图再比）
+    const clicked = toOriginalImageUrl(t.img.currentSrc || t.img.src || '')
+    openSelfViewer(list, Math.max(0, list.findIndex(it => it.src === clicked)))
   }
 
   // 动态页「查看大图」：按钮不是图片，FLIP 起点取相册内联展示的那张大图
@@ -209,17 +255,37 @@ export function setupImageViewer(): () => void {
   }, true)
 
   bag.on(document, 'click', (e) => {
-    if (!get('imageAnim')) return
-    if (isDragging) { isDragging = false; return }
+    const target = e.target as HTMLElement | null
+    if (target?.closest?.('.pswp') || target?.closest?.('.blie-iv')) return
+
+    // 拖动结束那一下不算「点击」（只有开着动画时才会记录拖动）
+    if (isDragging) {
+      isDragging = false
+      return
+    }
     if (isLocked()) {
       e.stopImmediatePropagation()
       e.preventDefault()
       return
     }
-    const target = e.target as HTMLElement | null
-    if (target?.closest?.('.pswp')) return
 
-    if (isAlbumPreviewClick(target)) return
+    // 相册缩略图 → 直接开**自绘**查看器。**不受 imageAnim 开关管**：这是「点图看大图」
+    // 的语义，不是开合动画，关掉动画的用户也该一步到位。
+    //
+    // **只在 click 这一层拦**，别去动 pointerdown / pointerup：B 站的相册在
+    // pointerdown / pointerup 上挂了状态（按下了谁、是不是一次有效点击）。把这两下
+    // 截掉之后，它 click 时走「兜底展开内联态」那条路（实测：内联态展开了、图没开）。
+    // 让指针事件原样过去，只截 click 就正好 —— 我们的监听挂在 document 捕获阶段，
+    // 比 B 站元素上的 click 早。
+    const thumb = albumThumbOf(target)
+    if (thumb) {
+      e.preventDefault()
+      e.stopPropagation()
+      openAlbumSelf(thumb)
+      return
+    }
+
+    if (!get('imageAnim')) return
 
     const albumImg = albumSource(target)
     if (albumImg) {

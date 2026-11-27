@@ -17,12 +17,14 @@
   padding: 4px;
   border-radius: 999px;
   /* 图片底色深浅不定：光靠半透明黑在深色照片上会和背景糊成一片（实测几乎看不见），
-     所以再加一圈 1px 白色内描边当轮廓 */
-  background: rgba(28, 28, 30, 0.78);
+     所以再加一圈 1px 白色内描边当轮廓。
+     底色比原来（0.78）更透：底部这条工具栏只在鼠标动的时候出现，压得太实会一直抢
+     画面；模糊保留，浅色照片上图标仍有内描边 + 投影兜底。 */
+  background: rgba(28, 28, 30, 0.5);
   backdrop-filter: blur(12px);
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.12),
-    0 4px 18px rgba(0, 0, 0, 0.34);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    0 4px 18px rgba(0, 0, 0, 0.22);
   transform: translateX(-50%);
   opacity: 0;
   pointer-events: none;
@@ -65,8 +67,8 @@
   position: relative;
   z-index: 1;
   display: block;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   fill: currentColor;
   /* 白图标压在浅色照片上会糊掉，投影给它一圈暗边（不依赖胶囊底色） */
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
@@ -89,7 +91,7 @@
   }
 
   .blie-img-tool svg {
-    width: 18px;
-    height: 18px;
+    width: 19px;
+    height: 19px;
   }
 }

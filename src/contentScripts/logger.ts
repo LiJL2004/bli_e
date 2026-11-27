@@ -29,6 +29,11 @@ export function setVerbose(on: boolean) {
   verbose = on
 }
 
+/** 当前是否开着详细日志（少数地方要按它决定「要不要额外挂调试 UI / 记快照」） */
+export function isVerbose() {
+  return verbose
+}
+
 export function log(...args: unknown[]) {
   if (!verbose)
     return

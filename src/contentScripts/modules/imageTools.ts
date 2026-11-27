@@ -27,10 +27,23 @@ const BTN_CLASS = 'blie-img-tool'
 /** 缩放命令的事件名（guard.js §9 那一侧监听同名事件） */
 const CMD_EVENT = 'blie-elite:pswp-cmd'
 const CMD_ATTR = 'data-blie-pswp-cmd'
+/** 「点图片不触发任何效果」这条命令 + guard.js 改完回写的完成标记 */
+const CMD_NOCLOSE = 'noclose'
+const CMD_NOCLOSE_DONE = 'noclose-done'
 const DEG = 90
 
-const ICON_OUT = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14zM7 9h5v1H7z"/></svg>'
-const ICON_IN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14zM12 7h-1v2H9v1h2v2h1v-2h2V9h-2z"/></svg>'
+/**
+ * 缩放两个图标：同一个放大镜镜框，只差中间那一笔 —— 放大是「＋」、缩小是「－」。
+ *
+ * 原来用的是 Material 的 `zoom_in` / `zoom_out`（实心填充路径），在 20px 下中间那根
+ * 加减号只有 5px 宽、1px 粗，跟镜框糊在一起，用户根本看不出哪个是放大。这里改成
+ * 描边：镜框细一点、加减号撑到镜框的 76%，粗细和镜框一致 —— 一眼能认出「＋ 放大、
+ * － 缩小」。`style="fill:none"` 是必须的：`imageTools.css` 给所有 svg 统一写了
+ * `fill: currentColor`（复位那个实心图标要用），内联样式优先级更高才能把它盖掉。
+ */
+const zoomIcon = (glyph: string) => `<svg viewBox="0 0 24 24" aria-hidden="true" style="fill:none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.6"/><path d="M15.3 15.3 20.2 20.2"/>${glyph}</svg>`
+const ICON_OUT = zoomIcon('<path d="M6.7 10.5h7.6"/>')
+const ICON_IN = zoomIcon('<path d="M6.7 10.5h7.6M10.5 6.7v7.6"/>')
 const ICON_ROT_L = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.11 8.53L5.7 7.11C4.8 8.27 4.24 9.61 4.07 11h2.02c.14-.87.49-1.72 1.02-2.47zM6.09 13H4.07c.17 1.39.72 2.73 1.62 3.89l1.41-1.42c-.52-.75-.87-1.59-1.01-2.47zm1.01 5.32c1.16.9 2.51 1.44 3.9 1.61V17.9c-.87-.15-1.71-.49-2.46-1.03L7.1 18.32zM13 4.07V1L8.45 5.55 13 10V6.09c2.84.48 5 2.94 5 5.91s-2.16 5.43-5 5.91v2.02c3.95-.49 7-3.85 7-7.93s-3.05-7.44-7-7.93z"/></svg>'
 const ICON_ROT_R = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.55 5.55L11 1v3.07C7.06 4.56 4 7.92 4 12s3.05 7.44 7 7.93v-2.02c-2.84-.48-5-2.94-5-5.91s2.16-5.43 5-5.91V10l4.55-4.45zM19.93 11a7.9 7.9 0 0 0-1.62-3.89l-1.42 1.42c.54.75.88 1.6 1.02 2.47h2.02zM13 17.9v2.02c1.39-.17 2.74-.71 3.9-1.61l-1.44-1.44c-.75.54-1.59.89-2.46 1.03zm3.89-2.42l1.42 1.41c.9-1.16 1.45-2.5 1.62-3.89h-2.02c-.14.87-.48 1.72-1.02 2.48z"/></svg>'
 const ICON_RESET = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 12c0-1.1-.9-2-2-2s-2 .9-2 2 .9 2 2 2 2-.9 2-2zm-2-9c-4.97 0-9 4.03-9 9H0l4 4 4-4H5c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 12 21c4.97 0 9-4.03 9-9s-4.03-9-9-9z"/></svg>'
@@ -96,6 +109,33 @@ export function setupImageTools(): () => void {
     pswp.dispatchEvent(new Event(CMD_EVENT))
   }
 
+  /**
+   * 点图片不触发任何效果。
+   *
+   * B 站给 pswp 配的是 `imageClickAction: 'zoom-or-close'`：点一下放大到 2x、再点关闭。
+   * 放大之后是拖着看图，鼠标 / 手指一抖就误触 —— 直接跳回原大小甚至把大图关掉。
+   * 实例在页面世界（`window.pswp`，隔离世界读不到），只能让 guard.js 代改
+   * `options.imageClickAction = false`；命令走缩放同一套通道。
+   *
+   * pswp 实例要等节点插进 body 之后才挂到 `window.pswp` 上，所以用 rAF 重试到
+   * guard.js 回写完成标记为止（30 帧 ≈ 500ms 上限，超时就放弃 —— 只是这一个开关没改到）。
+   */
+  function applyNoImageClick(pswpEl: HTMLElement) {
+    let tries = 0
+    const tick = () => {
+      if (pswpEl.getAttribute(CMD_ATTR) === CMD_NOCLOSE_DONE)
+        return
+      pswpEl.setAttribute(CMD_ATTR, CMD_NOCLOSE)
+      pswpEl.dispatchEvent(new Event(CMD_EVENT))
+      if (pswpEl.getAttribute(CMD_ATTR) === CMD_NOCLOSE_DONE)
+        return
+      if (++tries > 30)
+        return
+      requestAnimationFrame(tick)
+    }
+    tick()
+  }
+
   function onAction(act: string) {
     if (act === 'in') {
       sendZoom('in')
@@ -156,6 +196,7 @@ export function setupImageTools(): () => void {
     pswpEl.appendChild(el)
     bar = el
     watchSlide(pswpEl)
+    applyNoImageClick(pswpEl)
   }
 
   function detach() {

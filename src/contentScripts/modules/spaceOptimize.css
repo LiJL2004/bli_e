@@ -8,6 +8,8 @@
       改成 `width: fit-content`），字号变大（14px → 16px），数字与文字的距离收成 8px
       （原来靠 `space-between` 顶到两端）。动态页与投稿页是同一个组件，规则一致、
       改完两边大小位置自然一样。
+      **v036**：按钮收窄后侧栏容器还是 150px，右边空一大块 —— 把容器也收成内容宽
+      （见 §1.1），按钮到右侧内容从 56px 收到 20px。
    2. 「播放全部」`.playall-btn`（投稿 / 收藏等子页右上角）
       → 面板 `.text-btn` 那套：胶囊、#D3E3FD 底 + #1A73E8 字、13px/600、悬停 8% 状态层。
       高度沿用 B 站的 34px，不动周围对齐。
@@ -35,7 +37,22 @@
 html.bili-elite-space .side-nav {
   display: grid;
   grid-template-columns: max-content;
+  /* 见 1.1：按钮组在侧栏里靠右，宽度只占内容宽 */
+  width: fit-content !important;
+  margin-left: auto !important;
+  margin-right: 4px !important;
 }
+
+/* ---------- 1.1 按钮靠右、内容不动（v037）----------
+   v036 把侧栏容器一起收窄了，按钮是贴近内容了，但**右侧内容跟着左移** 36~54px
+   （动态页最明显：卡片变宽、列数都变了）。用户要求内容保持 B 站原位，只让按钮靠过去。
+
+   所以容器回到 B 站原样（150px + `margin-right: 16px`，一个字都不改），改由
+   `.side-nav` 自己右对齐：右边留 4px → 按钮右边缘离内容 20px（正好等于按钮自己的
+   左右 padding，视觉上一条缝），按钮组整体右移、左侧留白。内容位置与 B 站完全一致。
+
+   `margin-left: auto` 要求 `.side-nav` 有确定宽度（上面那条 `fit-content`）才生效，
+   父容器是普通 block（三个子页都是 div），不需要动 flex。 */
 
 html.bili-elite-space .side-nav__item {
   position: relative;

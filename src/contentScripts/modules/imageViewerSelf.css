@@ -1,0 +1,375 @@
+/* ===== 自绘图片查看器（1.2.5 v037）=====
+   替代 B 站的 PhotoSwipe。为什么不继续外挂：
+   我们在官方看图器上加了一整条工具栏（缩放 / 旋转 / 复位）、开合 FLIP、点图不触发 ——
+   每一样都得绕「实例只在页面世界的 `window.pswp`」这道墙（缩放靠 guard.js 代劳、
+   点图行为靠改 options、FLIP 靠轮询 `.pswp` 节点）。功能越多，绕得越多。
+
+   自己画一层：一个 fixed 全屏层 + 一张 `<img>` + 一条工具栏。
+   缩放 / 平移 / 旋转全是本地 `transform`，没有跨世界、没有实例、没有 guard.js。
+
+   结构：
+     .blie-iv              全屏层（opacity 淡入，pointer-events 由 is-open 控制）
+       .blie-iv__backdrop  遮罩（点它关闭）
+       .blie-iv__stage     图片舞台（pointer-events: none，只有 img 收事件）
+         .blie-iv__img     图片本体（transform 缩放 / 平移 / 旋转）
+       .blie-iv__nav       左右切图
+       .blie-iv__count     计数
+       .blie-iv__close     关闭
+       .blie-iv__bar       工具栏（缩小 / 放大 / 左旋 / 右旋 / 复位）
+
+   为什么舞台要 `pointer-events: none`、只有 img 是 auto：
+   用户要求「点图片不触发任何效果（方便放大后拖拽）」，所以点 img 一律不关；
+   点图片外的空白要能关 —— 空白处事件穿透到遮罩，由遮罩负责关闭。 */
+
+.blie-iv {
+  position: fixed;
+  inset: 0;
+  /* 盖住页面、也盖住我们自己的浮钮 / 设置键（看图时不需要它们；
+     同值时 DOM 靠后的一方在上，这一层是首次打开才建的，一定在它们之后） */
+  z-index: 2147483647;
+  display: block;
+  /* **整层不做 opacity 淡入淡出**：那会让「图片缩回缩略图」的 FLIP 被整体淡出盖住，
+     看起来只是一闪。显隐交给各子层自己（遮罩 / 工具栏 / 图片），图片由 FLIP 主导。 */
+  pointer-events: none;
+  /* 关闭后要等 FLIP 播完才彻底藏起来 —— 不然 290ms 的「缩回去」会被瞬间隐藏吞掉。
+     打开时这条 transition 被 .is-open 覆盖成 0s，不会延迟显示。 */
+  visibility: hidden;
+  transition: visibility 0s linear 300ms;
+  /* 拖图时不要选中文字 / 触发浏览器自己的图片拖拽 */
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.blie-iv.is-open {
+  pointer-events: auto;
+  visibility: visible;
+  transition: visibility 0s;
+}
+
+/* ---------- 遮罩 ---------- */
+.blie-iv__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.9);
+  opacity: 0;
+  transition: opacity 200ms cubic-bezier(0.2, 0, 0, 1);
+  /* 毛玻璃参数由 TS 按「图片查看器毛玻璃」开关写进内联样式（同 imageGlass） */
+}
+
+.blie-iv.is-open .blie-iv__backdrop {
+  opacity: 1;
+}
+
+/* ---------- 图片舞台 ---------- */
+.blie-iv__stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  transform-origin: center center;
+  /* 见文件头：空白处要穿透给遮罩去关 */
+  pointer-events: none;
+}
+
+/* 图片的**位置和尺寸由 JS 精确写死**（`placeImg` 按当前这张图的 naturalWidth/Height
+   算 contain 后的 rect），不用 `max-width: 100%` 让浏览器自己算 —— 因为「裁剪缩略图 →
+   完整缩略图 → 原图」每一阶段的比例都不一样，只有我们自己知道目标 rect 才能让
+   `left/top/width/height` 走 CSS transition 平滑过渡。
+
+   `object-fit: cover` 是关键：区域比例和图片比例不一致时（过渡中间那一小段），
+   图片始终填满区域、多出来的部分裁掉 —— 视觉上就是「裁剪的缩略图慢慢展开成完整图」，
+   不会出现黑边，也不会被拉伸变形。 */
+.blie-iv__img {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  object-fit: cover;
+  transform-origin: center center;
+  will-change: transform;
+  cursor: default;
+  -webkit-user-drag: none;
+  /* 换图时先透明，等新图解码好再显示（避免闪上一张的尺寸）。
+     **opacity 不加过渡**：打开时是 FLIP 动画，再叠一层淡入会糊掉「从缩略图飞出来」。 */
+  opacity: 0;
+  pointer-events: none;
+  /* 阶段过渡：只动几何属性，不走 transform（transform 留给缩放 / 平移 / 旋转） */
+  transition:
+    left 260ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+    top 260ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+    width 260ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+    height 260ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* 首帧 / 换图前那一次定位要瞬时，不能让 transition 从 0×0 长出来 */
+.blie-iv__img.is-snap {
+  transition: none;
+}
+
+.blie-iv.is-open .blie-iv__img {
+  pointer-events: auto;
+}
+
+.blie-iv__img.is-ready {
+  opacity: 1;
+}
+
+/* 放大之后才有「抓手」语义 */
+.blie-iv.is-zoomed .blie-iv__img {
+  cursor: grab;
+}
+
+.blie-iv.is-dragging .blie-iv__img {
+  cursor: grabbing;
+}
+
+/* ---------- 左右切图 ---------- */
+.blie-iv__nav {
+  position: absolute;
+  top: 50%;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  margin-top: -24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(28, 28, 30, 0.5);
+  backdrop-filter: blur(12px);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 160ms cubic-bezier(0.2, 0, 0, 1), background-color 120ms linear;
+}
+
+.blie-iv.is-open .blie-iv__nav {
+  opacity: 1;
+}
+
+.blie-iv__nav.is-prev {
+  left: 20px;
+}
+
+.blie-iv__nav.is-next {
+  right: 20px;
+}
+
+.blie-iv__nav:hover {
+  background: rgba(28, 28, 30, 0.72);
+}
+
+.blie-iv__nav svg {
+  display: block;
+  width: 26px;
+  height: 26px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
+  pointer-events: none;
+}
+
+/* ---------- 计数 ---------- */
+/* 工具栏 / 计数 / 关闭跟遮罩一起淡入淡出（左右箭头自己有一段） */
+.blie-iv__count,
+.blie-iv__close,
+.blie-iv__bar {
+  opacity: 0;
+  transition: opacity 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.blie-iv.is-open .blie-iv__count,
+.blie-iv.is-open .blie-iv__close,
+.blie-iv.is-open .blie-iv__bar {
+  opacity: 1;
+}
+
+.blie-iv__count {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  z-index: 3;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(28, 28, 30, 0.5);
+  backdrop-filter: blur(12px);
+  color: rgba(255, 255, 255, 0.92);
+  font: 500 13px/1.4 -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.blie-iv__count:empty {
+  display: none;
+}
+
+/* ---------- 关闭 ---------- */
+.blie-iv__close {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(28, 28, 30, 0.5);
+  backdrop-filter: blur(12px);
+  color: #fff;
+  cursor: pointer;
+  transition: background-color 120ms linear;
+}
+
+.blie-iv__close:hover {
+  background: rgba(28, 28, 30, 0.72);
+}
+
+.blie-iv__close svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+
+/* ---------- 底部工具栏（与 imageTools.css 的胶囊同一套观感）---------- */
+.blie-iv__bar {
+  position: absolute;
+  left: 50%;
+  bottom: 28px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(28, 28, 30, 0.5);
+  backdrop-filter: blur(12px);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    0 4px 18px rgba(0, 0, 0, 0.22);
+  transform: translateX(-50%);
+}
+
+.blie-iv__btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  overflow: hidden;
+  /* 涟漪是 absolute 子节点，容器必须 relative + hidden */
+  transition: background-color 120ms cubic-bezier(0.2, 0, 0, 1);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.blie-iv__btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.blie-iv__btn:active {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.blie-iv__btn svg {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 22px;
+  height: 22px;
+  fill: currentColor;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
+  pointer-events: none;
+}
+
+/* 当前缩放比例：只读文字，放在工具栏最右边（和按钮同一颗胶囊里） */
+.blie-iv__zoom {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 46px;
+  height: 40px;
+  padding: 0 8px;
+  color: rgba(255, 255, 255, 0.82);
+  font: 500 12px/1 -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* 放大 / 缩小是描边镜框：CSS 的 `fill: currentColor` 要盖掉（内联 style 优先级更高，
+   见 imageViewerSelf.ts 的 zoomIcon） */
+.blie-iv__btn svg[style] {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
+}
+
+/* ---------- 窄屏 ---------- */
+@media (width <= 640px) {
+  .blie-iv__bar {
+    bottom: 16px;
+    padding: 3px;
+  }
+
+  .blie-iv__btn {
+    width: 34px;
+    height: 34px;
+  }
+
+  .blie-iv__btn svg {
+    width: 19px;
+    height: 19px;
+  }
+
+  .blie-iv__zoom {
+    min-width: 40px;
+    height: 34px;
+    padding: 0 6px;
+    font-size: 11px;
+  }
+
+  .blie-iv__nav {
+    width: 40px;
+    height: 40px;
+    margin-top: -20px;
+  }
+
+  .blie-iv__nav.is-prev {
+    left: 8px;
+  }
+
+  .blie-iv__nav.is-next {
+    right: 8px;
+  }
+}
+
+/* ---------- 减少动态效果 ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .blie-iv {
+    transition: none;
+  }
+}

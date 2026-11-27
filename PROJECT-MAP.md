@@ -36,7 +36,8 @@
 | 网页全屏动画 | `webscreenAnim` | 播放页、直播页 | `videoFullscreen.ts` | 时长 / 曲线在 `designTokens.css` |
 | 宽屏模式动画 | `wideAnim` | 播放页 | `videoFullscreen.ts` + `playerMode.ts`（模式判定） | 同上 |
 | 评论区图片动画 | `imageAnim` | 评论区、动态页相册 | `imageViewer.ts` + `imageStyle.ts` | 内联在 `imageStyle.ts`（`<style id="bili-elite-anim-style">`） |
-| 看图器工具栏（缩小/放大/左右旋转/复位） | 常开 | 图片查看器（PhotoSwipe） | `imageTools.ts` | `imageTools.css` |
+| 自绘图片查看器（缩放/拖拽/旋转/复位/多图） | 常开 | 动态页相册（点图直接进） | `imageViewerSelf.ts` | `imageViewerSelf.css` |
+| 看图器工具栏（缩小/放大/左右旋转/复位） | 常开 | 官方 PhotoSwipe（评论区等入口兜底） | `imageTools.ts` | `imageTools.css` |
 | 卡片「已关注」胶囊 | 常开 | 首页（B 站原生节点，我们只改样式） | `topbarOptimize.ts`（按文本打标） | `topbar.css` §18 + `night.css` §5.2 |
 | 面板卡片级联 | `panelCascade` | 设置面板 | `settingsPanel.ts` | `panel.css` §19 |
 
@@ -170,7 +171,10 @@ scripts/                    prepare / manifest / pack-edge / pack-source / zip
 | `pageActions.ts` | 刷新 / 回到顶部两个动作（浮钮与快捷键共用） |
 | `hoverPrefetch.ts` | 悬停预取 + 首屏空闲预取 + 点击接管（`playBoost` 的实现） |
 | `cardWholeClick.ts` | 卡片整体化（整卡可点） |
-| `imageViewer.ts` | 图片开合 FLIP（评论区 / 动态页相册 / 看图器） |
+| `imageViewer.ts` | 图片开合 FLIP（评论区 / 看图器）；动态页相册缩略图**一步开自绘查看器**（拦下 B 站的内联中间态） |
+| `imageViewerSelf.ts` | 自绘图片查看器（缩放 / 拖拽 / 旋转 / 复位 / 多图 / FLIP / 渐进加载）；注入 `imageViewerSelf.css` |
+| `pswpTakeover.ts` | 把 B 站所有入口的 PhotoSwipe 接管到自绘那层（读 `guard.js` §11 给的 dataSource） |
+| `viewerParams.ts` | 看图器的两个数值参数（按钮 / 滚轮缩放步进，无开关） |
 | `imageStyle.ts` | 图片开合动画的 CSS（内联注入） |
 | `imageGlass.ts` | 图片查看器毛玻璃（内联注入） |
 | `imageTools.ts` | 看图器底部工具栏（旋转走 `<img>` 的 rotate；缩放命令交给 `guard.js` §9）；注入 `imageTools.css` |

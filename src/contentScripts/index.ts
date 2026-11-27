@@ -11,6 +11,8 @@ import { bootstrapHomePanelConfig } from './modules/homePanelConfig'
 import { setupHoverPrefetch } from './modules/hoverPrefetch'
 import { setupImageGlass } from './modules/imageGlass'
 import { setupImageViewer } from './modules/imageViewer'
+import { setupPswpTakeover } from './modules/pswpTakeover'
+import { setupSelfViewer } from './modules/imageViewerSelf'
 import { setupImageStyle } from './modules/imageStyle'
 import { setupImageTools } from './modules/imageTools'
 import { setupLabFeatures } from './modules/labFeatures'
@@ -40,6 +42,7 @@ import { bootstrapTopbarConfig } from './modules/topbarConfig'
 import { setupTopbarOptimize } from './modules/topbarOptimize'
 import { setupVideoBeta } from './modules/videoBeta'
 import { setupVideoFullscreen } from './modules/videoFullscreen'
+import { bootstrapViewerConfig } from './modules/viewerParams'
 
 /**
  * 这一帧是不是**我们自己**嵌的视频页（动态页「动态悬浮打开beta」里的视频悬浮窗）。
@@ -95,6 +98,8 @@ if (IS_TOP) {
   bootstrapTopbarConfig()
   bootstrapPanelConfig()
   bootstrapPanelScaleConfig()
+  // 自绘看图器的两个数值（按钮 / 滚轮缩放步进）：没有开关，只有参数
+  bootstrapViewerConfig()
   // 「快速使用设置面板」的呼出键：与开关（bili-elite-settings）分开存
   bootstrapPanelHotkeyConfig()
   bootstrapPreloadConfig()
@@ -185,6 +190,12 @@ function initModules() {
   // 看图器底部工具栏（缩小 / 放大 / 左右旋转 / 复位）。只挂一个 body 的 childList
   // 观察器等 `.pswp` 出现，同样很便宜，跟着上面一起装
   setupImageTools()
+  // 自绘看图器：只注入一份 CSS + 一个 document 的 keydown（面板里没有开关，
+  // DOM 等到第一次打开相册才建）。相册点击由 setupImageViewer 接过来后调它
+  setupSelfViewer()
+  // 把 B 站其它入口（评论区 / 专栏 / 空间页）的 PhotoSwipe 也接管到自绘那层：
+  // 只挂一个 body 的 childList 观察器，等 `.pswp` 冒出来再把数据要过来
+  setupPswpTakeover()
 
   runWhenIdle(() => {
     setupImageViewer()

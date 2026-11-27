@@ -66,6 +66,14 @@ import {
   setPanelScale,
 } from './panelScaleConfig'
 import {
+  VIEWER_PARAM_DEFS,
+  type ViewerParamKey,
+  getViewerParams,
+  onViewerParamsChange,
+  resetViewerParams,
+  setViewerParam,
+} from './viewerParams'
+import {
   PRELOAD_PARAM_DEFS,
   getPreloadParams,
   onPreloadParamsChange,
@@ -404,7 +412,7 @@ const NAV_ICONS: Record<string, string> = {
  * 每改一次代码把 v 后面 +1（v001 → v002 …），正式版本号升级时才重置回 v001。
  * 规则写在 `.opencode/skills/bili-elite/SKILL.md` 的「版本、发布与图标」一节。
  */
-const DEV_VERSION = '1.2.5 v034'
+const DEV_VERSION = '1.2.5 v061'
 
 
 
@@ -681,6 +689,9 @@ export function setupSettingsPanel(): () => void {
     if (groupName === BOOST_GROUP) {
       blocks.push(`\n          <div class="block-note">节点测速</div>`)
       blocks.push(`\n          <div class="setting-block is-plain cdn-card">${cdnCardHtml()}\n          </div>`)
+      // 图片查看器：自绘的那一层是全站常开的，**没有开关**，只暴露两个数值
+      blocks.push(`\n          <div class="block-note">图片查看器</div>`)
+      blocks.push(`\n          <div class="setting-block is-plain">${VIEWER_PARAM_DEFS.map(d => rangeRowHtml('viewer', d)).join('')}\n          </div>`)
     }
     return `
         <div class="page${i === 0 ? ' is-active' : ''}${STACK_GROUPS.has(groupName) ? ' is-stack' : ''}" data-page="${groupName}">
@@ -1423,6 +1434,54 @@ export function setupSettingsPanel(): () => void {
     syncScale()
   }))
 
+  // 「图片查看器」的两个参数：同样不属于任何开关，单独渲染与接线
+  const viewerInputs = Array.from(shadow.querySelectorAll<HTMLInputElement>('input[data-viewer]'))
+  const syncViewer = () => {
+    const p = getViewerParams()
+    for (const input of viewerInputs) {
+      const key = input.getAttribute('data-viewer') as ViewerParamKey | null
+      if (!key)
+        continue
+      input.value = String(p[key])
+      updateRangeFill(input)
+      const valEl = shadow.querySelector<HTMLElement>(`[data-viewer-val="${key}"]`)
+      const def = VIEWER_PARAM_DEFS.find(d => d.key === key)
+      if (valEl && def)
+        valEl.textContent = def.fmt(p[key])
+    }
+  }
+
+  for (const input of viewerInputs) {
+    const key = input.getAttribute('data-viewer') as ViewerParamKey | null
+    const def = key ? VIEWER_PARAM_DEFS.find(d => d.key === key) : null
+    if (!key || !def)
+      continue
+
+    const onViewerInput = () => setViewerParam(key, Number.parseFloat(input.value))
+    input.addEventListener('input', onViewerInput)
+    cleanups.push(() => input.removeEventListener('input', onViewerInput))
+
+    const valEl = shadow.querySelector<HTMLElement>(`[data-viewer-val="${key}"]`)
+    if (valEl) {
+      const onViewerValClick = (e: Event) => {
+        e.stopPropagation()
+        startValueEdit({
+          el: valEl,
+          value: getViewerParams()[key],
+          min: def.min,
+          max: def.max,
+          step: def.step,
+          commit: v => setViewerParam(key, v),
+          restore: () => syncViewer(),
+        })
+      }
+      valEl.addEventListener('click', onViewerValClick)
+      cleanups.push(() => valEl.removeEventListener('click', onViewerValClick))
+    }
+  }
+  cleanups.push(onViewerParamsChange(() => syncViewer()))
+  syncViewer()
+
   /* ===== 快捷功能 · 功能轮盘 =====
      编辑器是「左侧圆盘预览 + 右侧功能格」。**两侧的选中态完全独立**（用户明确要求：
      点左边某一格时右边不该跟着亮）：左边选的是「位置」，右边选的是「功能」。
@@ -1754,6 +1813,7 @@ export function setupSettingsPanel(): () => void {
     resetSearchCardParams()
     resetRailCardParams()
     resetPanelScale()
+    resetViewerParams()
     resetWheelGlassParams()
     applyWheelGlassVars()
     resetWheelConfig()

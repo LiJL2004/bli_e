@@ -846,6 +846,24 @@
       if (!cmd) return
       var p = window.pswp
       if (!p || p.element !== el) return
+
+      /* 点图片不触发任何效果（1.2.5 v036）——
+       *
+       * B 站给 pswp 配的是 `imageClickAction: 'zoom-or-close'`：点一下放大到 2x、
+       * 再点关闭。用户放大之后是拖着看图，鼠标 / 手指一抖就误触 —— 直接跳回原大小
+       * 甚至把大图关掉。这里改成 false：点图片什么都不做，关闭仍走点背景 / Esc /
+       * 右上角那颗叉。
+       *
+       * 改的是**运行时现读**的 options 字段（pswp 的 `_onTap` 每次都读
+       * `this.options.imageClickAction`），所以实例建好之后再改也生效。
+       * 改完在元素上回写 `noclose-done`，内容脚本据此停止重试。
+       */
+      if (cmd === 'noclose') {
+        p.options.imageClickAction = false
+        el.setAttribute('data-blie-pswp-cmd', 'noclose-done')
+        return
+      }
+
       var slide = p.currSlide
       if (!slide) return
       var levels = slide.zoomLevels || {}
@@ -865,4 +883,152 @@
     }, true)
   }
   catch (e) {}
+
+  /* §11 把 B 站的 PhotoSwipe 接管给自绘查看器（1.2.5 v041）
+   *
+   * 自绘看图器要覆盖**所有**图片入口（评论区、专栏、空间页……）。逐个识别容器既认不全
+   * 也容易漏，换个方向：B 站所有图片查看最终都走 PhotoSwipe，那我们就在它建好的一瞬间
+   * 把数据接过来 —— 读 `options.dataSource`（每项有 `src` / `msrc` / `width` / `height`）
+   * 和 `currIndex`，序列化写到 `<html data-blie-pswp-json>`，然后把实例 destroy 掉。
+   * 内容脚本拿到 JSON 就用自己的那层打开同一组图。
+   *
+   * 通道同 §8 / §9：属性当数据、事件当敲门砖。实例可能还没挂到 `window.pswp`
+   * （节点刚 append、构造还没返回），那种情况什么都不写，让内容脚本重试。
+   */
+  try {
+    document.addEventListener('blie-elite:pswp-takeover', function () {
+      var root = document.documentElement
+      if (!root.hasAttribute('data-blie-pswp-takeover')) return
+      root.removeAttribute('data-blie-pswp-takeover')
+      var p = window.pswp
+      if (!p) return
+      /* 实例和页面上的节点对不上 = 旧实例（上一次已经被我们 destroy 了）。
+       * 这时候接管会拿旧数据去开新的图，B 站那边也会因为「pswp 已经存在」而不重建 ——
+       * 表现就是「关掉一张之后，下一张点不开」。直接放行，让 B 站自己走。 */
+      var domEl = document.querySelector('.pswp')
+      if (domEl && p.element !== domEl) return
+      var ds = (p.options && p.options.dataSource) || p.items || []
+      var out = {
+        index: typeof p.currIndex === 'number' ? p.currIndex : 0,
+        items: [],
+      }
+      for (var i = 0; i < ds.length; i++) {
+        var it = ds[i] || {}
+        var src = it.src || it.o || ''
+        if (!src) continue
+        out.items.push({
+          src: src,
+          thumb: it.msrc || '',
+          w: it.width || it.w || 0,
+          h: it.height || it.h || 0,
+        })
+      }
+      if (!out.items.length) return
+      root.setAttribute('data-blie-pswp-json', JSON.stringify(out))
+      try { p.destroy() } catch (e) {}
+      /* **关键的一刀（1.2.5 v056）**：PhotoSwipe 5 的 `destroy()` 第一行是
+       *   `if (!this.isDestroying) return this.options.showHideAnimationType='none', void this.close()`
+       * —— 只调 close() 就 return，真正摘监听（`this.events.removeAll()`）在「关闭动画结束后」
+       * 的 destroy() 里。而我们紧接着就把 `.pswp` 元素移除了，动画永远跑不完 →
+       * document 上的 keydown 永远留着 → 它收到 ←/→ 就无条件 preventDefault →
+       * **整页 ←→ 被永久吞掉**（用户报的「看完评论图后视频按不动」）。
+       * `events` / `keyboard` 都是实例上的公开属性，这里直接把它的 DOM 监听摘干净。 */
+      try { p.events && typeof p.events.removeAll === 'function' && p.events.removeAll() } catch (e) {}
+      try { p.keyboard && typeof p.keyboard.destroy === 'function' && p.keyboard.destroy() } catch (e) {}
+      if (p.element && p.element.parentNode) {
+        try { p.element.parentNode.removeChild(p.element) } catch (e) {}
+      }
+      /* 把 `window.pswp` 也清掉：B 站自己的打开逻辑常常先看「有没有已存在的实例」，
+       * 留着一个 destroyed 的实例会让它以为图已经开着、于是再也不建新的
+       * （用户报的「关掉一个之后下一张打不开」）。 */
+      if (window.pswp === p) window.pswp = null
+    })
+  }
+  catch (e) {}
 })()
+
+/* §13 记录 document 上的 keydown 监听 + 按栈精确摘除（1.2.5 v057）
+ *
+ * PhotoSwipe 5 的键盘模块挂在 `document` 上，收到 ←/→ 就无条件 `preventDefault()`。
+ * 它的实例被我们接管/销毁不彻底时，这条监听会永久留着 —— 整页 ←/→ 全被吃掉，
+ * 而且实例不一定挂在 `window.pswp` 上（实测拿不到实例时照样被吞）。
+ *
+ * 所以这里在 `addEventListener` 上加一层：只对「document 上的 keydown」记录
+ * **是谁加的**（抓 addEventListener 那一刻的调用栈）。需要时按栈精确摘掉那一条 ——
+ * 播放器自己的监听栈里没有 photoswipe，不会被误伤。
+ *
+ * 通道同 §8：普通 Event 当敲门砖。这条链只在「按键真的被吞」或「关掉看图器」时才跑，
+ * 平时只有一次字符串比较的开销。
+ */
+try {
+  var origAddEL = EventTarget.prototype.addEventListener
+  if (!origAddEL.__blieWrapped) {
+    var blieKeyHandlers = []
+    /* `unload` 从 Chrome 117 起被弃用，新版浏览器默认用 Permissions-Policy 把它禁掉。
+     * 被禁的文档里注册 `unload` 监听会打一条 "Permissions policy violation"，而堆栈顶帧
+     * 正好落在下面这层 wrapper 上 —— B 站首页（laputa-home）自己注册的，看起来却像我们发的。
+     * 这种文档里这条监听本来就不会触发，直接不注册：控制台干净，行为不变；
+     * 允许 unload 的文档（老浏览器 / 站点没设这条 policy）照旧原样注册。
+     * 结果缓存一份：同一个文档里 policy 不会中途变。 */
+    var blieUnloadBanned = null
+    var blieUnloadIsBanned = function () {
+      if (blieUnloadBanned !== null) return blieUnloadBanned
+      try {
+        var pol = document.permissionsPolicy || document.featurePolicy
+        if (pol && typeof pol.allowsFeature === 'function')
+          blieUnloadBanned = pol.allowsFeature('unload') === false
+      } catch (e) {}
+      return blieUnloadBanned === true
+    }
+    var wrappedAddEL = function (type, fn, opts) {
+      if (type === 'unload' && blieUnloadIsBanned()) return
+      try {
+        if (type === 'keydown' && this === document && typeof fn === 'function') {
+          var st = ''
+          try { st = (new Error()).stack || '' } catch (e) {}
+          var cap = !!(opts && (opts === true || opts.capture))
+          blieKeyHandlers.push({ fn: fn, stack: st, capture: cap, at: Date.now(), removed: false })
+          if (blieKeyHandlers.length > 60) blieKeyHandlers.shift()
+        }
+      } catch (e3) {}
+      return origAddEL.apply(this, arguments)
+    }
+    wrappedAddEL.__blieWrapped = true
+    EventTarget.prototype.addEventListener = wrappedAddEL
+    window.__blieKeyHandlers = blieKeyHandlers
+  }
+}
+catch (e) {}
+
+/* 运行时补刀：内容脚本发现「真实按键被 preventDefault」时派这个事件。 */
+try {
+  document.addEventListener('blie-elite:kill-pswp', function () {
+    var killed = 0
+    var list = window.__blieKeyHandlers || []
+    for (var i = 0; i < list.length; i++) {
+      var it = list[i]
+      if (it.removed) continue
+      if (!/photoswipe/i.test(it.stack)) continue
+      try {
+        document.removeEventListener('keydown', it.fn, it.capture)
+        it.removed = true
+        killed++
+      } catch (e) {}
+    }
+    /* `window.pswp` 上如果还有实例，也把它的监听收掉（双保险） */
+    try {
+      var p = window.pswp
+      if (p) {
+        try { p.events && typeof p.events.removeAll === 'function' && p.events.removeAll() } catch (e) {}
+        try { p.keyboard && typeof p.keyboard.destroy === 'function' && p.keyboard.destroy() } catch (e) {}
+        killed++
+      }
+    } catch (e) {}
+    try { window.pswp = null } catch (e) {}
+    if (killed > 0) {
+      /* 事后核对用：摘了几条（不刷屏，只留最后一次） */
+      try { document.documentElement.setAttribute('data-blie-pswp-killed', String(killed)) } catch (e) {}
+    }
+  })
+}
+catch (e) {}
